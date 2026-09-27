@@ -1,0 +1,96 @@
+package com.dex.boxcore.boost;
+
+import com.dex.boxcore.config.BoostType;
+import com.dex.boxcore.config.CoreConfig;
+import org.bukkit.entity.Player;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Effective multipliers of online players (§7.1). Entries are immutable snapshots that are replaced, never
+ * mutated, so any thread may read them. Writes happen on the main thread only.
+ */
+public final class EffectiveCache {
+
+    /**
+     * Immutable per-player snapshot; all arrays are indexed by {@link BoostType#index()}.
+     *
+     * @param types     the declared types this snapshot was computed with (index source)
+     * @param effective effective multiplier (always >= 1)
+     * @param rank      rank value R (0 = no rank)
+     * @param bottle    active personal bottle B (0 = none)
+     * @param global    active global boost G (0 = none)
+     */
+    public record Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global) {
+
+        private int value(int[] values, String type, int absent) {
+            BoostType t = type == null ? null : types.get(type);
+            return t == null ? absent : values[t.index()];
+        }
+
+        public int effective(String type) {
+            return value(effective, type, 1);
+        }
+
+        public int rank(String type) {
+            return value(rank, type, 0);
+        }
+
+        public int bottle(String type) {
+            return value(bottle, type, 0);
+        }
+
+        public int global(String type) {
+            return value(global, type, 0);
+        }
+
+        /** {@code max(R + B, 1)}. */
+        public int personal(String type) {
+            return MultiplierCalculator.personal(rank(type), bottle(type));
+        }
+    }
+
+    private final ConcurrentHashMap<UUID, Snapshot> entries = new ConcurrentHashMap<>();
+
+    /** Effective multiplier, 1 for unknown players or types. Thread-safe, allocation-free. */
+    public int get(UUID player, String type) {
+        Snapshot s = entries.get(player);
+        return s == null ? 1 : s.effective(type);
+    }
+
+    /** @return the player's snapshot, or {@code null} if the player is not online */
+    public Snapshot snapshot(UUID player) {
+        return entries.get(player);
+    }
+
+    /** Recomputes and replaces a player's entry (main thread). */
+    public Snapshot recompute(Player player, CoreConfig config, BoostRegistry registry, long now) {
+        Map<String, BoostType> types = config.types();
+        int size = types.size();
+        int[] rank = PermissionReader.read(player, types);
+        int[] bottle = new int[size];
+        int[] global = new int[size];
+        int[] effective = new int[size];
+        List<PersonalBoost> personal = registry.personal(player.getUniqueId());
+        for (BoostType type : config.typeList()) {
+            int i = type.index();
+            bottle[i] = MultiplierCalculator.bottle(personal, type.id(), now);
+            global[i] = MultiplierCalculator.global(registry.global(type.id()), now);
+            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], type.maxMultiplier());
+        }
+        Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global);
+        entries.put(player.getUniqueId(), snapshot);
+        return snapshot;
+    }
+
+    public void remove(UUID player) {
+        entries.remove(player);
+    }
+
+    public void clear() {
+        entries.clear();
+    }
+}

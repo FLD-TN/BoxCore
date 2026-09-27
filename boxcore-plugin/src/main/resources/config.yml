@@ -1,0 +1,75 @@
+# BoxCore — configuration
+
+# Do not change. Files without it (BoxCore 1.0.0) are backed up and replaced by the new defaults
+config-version: 2
+#
+# Boost multipliers are integers. Per player and type, with absent sources counted as 0:
+#   R = rank permission  boxcore.boost.<type>.<n>, n >= 2 (e.g. boxcore.boost.mining.5, give it with LuckPerms)
+#   B = the active personal bottle (at most one per type; a better bottle replaces the active one)
+#   G = the global boost  /boxcore global start <type> <multiplier> <duration>
+#   effective = min( max(R + B, G, 1), max-multiplier )
+# Rank and bottle add up; the global boost never adds, it only wins when it is higher than R + B.
+#
+# SECURITY: players without a staff rank must NOT have creative mode. A hacked creative client can craft
+# items with arbitrary data, including boost bottles. Bottle data is re-validated against this file on
+# every use, but only the limits below protect you from a crafted bottle.
+
+# Boost types. A type only has an effect if some plugin asks BoxCore for it
+# (mining: CataMines, quest: BoxQuest). Giving a bottle of an undeclared type is refused.
+#   id              ^[a-z0-9_]{1,32}$
+#   max-multiplier  integer >= 2, largest multiplier for bottles, global boosts and rank permissions,
+#                   and the cap of the final effective value (rank + bottle is capped here)
+#   max-duration    e.g. 30m, 12h, 1d, 1h30m
+#   color           text colour of the type name in messages, bottle names and bossbar titles ('#RRGGBB')
+#   bossbar-color   colour of the bar itself, only PINK, BLUE, RED, GREEN, YELLOW, PURPLE, WHITE exist
+#                   (no orange or aqua: mining uses YELLOW, quest uses BLUE)
+# Lowering max-multiplier or max-duration makes existing bottles above the new limit unusable (not consumed).
+types:
+  mining:
+    display-name: 'Mining'
+    description: 'Tăng x%multiplier% vật phẩm nhận được khi đào các khối'
+    max-multiplier: 100
+    max-duration: 24h
+    color: '#FFAA00'
+    bossbar-color: YELLOW
+  quest:
+    display-name: 'Quest'
+    description: 'Tăng x%multiplier% phần thưởng nhận được khi hoàn thành nhiệm vụ (/quest)'
+    max-multiplier: 100
+    max-duration: 24h
+    color: '#55FFFF'
+    bossbar-color: BLUE
+
+bottle:
+  # Item material of boost bottles. Vanilla behaviour (throwing, filling, placing...) is always blocked
+  material: EXPERIENCE_BOTTLE
+  # RIGHT or LEFT. Note: LEFT may be triggered accidentally during PvP (every swing is a left click)
+  use-click: RIGHT
+  # Minimum ticks between two uses by the same player (20 ticks = 1 second)
+  use-cooldown-ticks: 10
+  # A bottle that would have no effect (not higher than the current multiplier) is only consumed
+  # if used a second time within this many seconds
+  confirm-window-seconds: 5
+  # Sound played on a successful activation (a Minecraft sound key), '' disables it
+  success-sound: 'entity.player.levelup'
+
+# How often rank permissions are re-read for online players, in seconds
+permission-refresh-seconds: 30
+
+# Timezone of displayed clock times (/boxcore check). Never the host's default timezone
+timezone: 'Asia/Ho_Chi_Minh'
+
+storage:
+  # A save runs at most once every this many seconds after a change
+  save-debounce-seconds: 5
+
+# Server-wide text style shared with the other in-house plugins
+style:
+  # Convert plugin-authored text to small caps (a–z only; tags and placeholders are never converted)
+  small-caps: true
+  palette:
+    text: '#FFFFFF'
+    muted: '#C8C8C8'
+    accent: '#FFD166'
+    success: '#55FF55'
+    error: '#FF5555'

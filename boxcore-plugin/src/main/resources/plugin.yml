@@ -1,0 +1,26 @@
+name: BoxCore
+version: '${version}'
+main: com.dex.boxcore.BoxCorePlugin
+api-version: '1.21'
+author: Dex
+description: Core services for the BoxPvP server (boosts)
+softdepend: [PlaceholderAPI]
+
+commands:
+  boxcore:
+    description: BoxCore admin commands (give, global, reload, check)
+    usage: /boxcore <give|global|reload|check>
+  booster:
+    description: Boost usage guide
+    usage: /booster
+
+permissions:
+  boxcore.use:
+    description: Use boost bottles and /booster
+    default: true
+  boxcore.admin:
+    description: All /boxcore sub-commands
+    default: op
+    children:
+      boxcore.use: true
+  # boxcore.boost.<type>.<n> are dynamic rank permissions, no declaration needed

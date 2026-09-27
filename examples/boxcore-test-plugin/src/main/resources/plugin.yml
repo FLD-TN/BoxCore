@@ -1,0 +1,13 @@
+name: BoxCoreTest
+version: '1.0.0'
+main: com.dex.boxcoretest.BoxCoreTestPlugin
+api-version: '1.21'
+author: Dex
+description: Integration test consumer of the BoxCore API
+softdepend: [BoxCore]
+
+commands:
+  boxcoretest:
+    description: Print BoxCore multipliers seen through the API
+    usage: /boxcoretest [player]
+    permission: boxcore.admin

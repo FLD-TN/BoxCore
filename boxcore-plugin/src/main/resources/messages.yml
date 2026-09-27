@@ -1,0 +1,114 @@
+# BoxCore — messages
+
+# Do not change. Files without it (BoxCore 1.0.0) are backed up and replaced by the new defaults
+config-version: 2
+#
+# Palette tags: <text> <muted> <accent> <success> <error> (hex values in config.yml, style.palette)
+# <type> is the colour of the boost type being shown (config.yml types.<id>.color)
+# Bold is only used in bossbar titles
+# Symbols: ✔ (success), ✘ (error), • (bullet), › (prefix), (!) — quantities are written x10
+# One line per message, no exclamation marks, no trailing full stops
+# A message set to '' is not sent
+# Small caps (config.yml style.small-caps) is applied to every template at load;
+# tags and %placeholders% are never converted
+
+# Prepended to every chat message, '' removes it
+prefix: '<muted>Booster › '
+
+# Unit words for durations: 20 phút, 1 giờ 30 phút, 2 ngày 3 giờ, 45 giây
+units:
+  second: 'giây'
+  minute: 'phút'
+  hour: 'giờ'
+  day: 'ngày'
+
+# %click% in the bottle lore and the /booster guide, follows bottle.use-click in config.yml
+click:
+  right: 'Chuột phải'
+  left: 'Chuột trái'
+
+bottle:
+  used: '<success>✔ Đã kích hoạt <type>Boost %type_name% x%multiplier% <muted>trong <text>%duration%'
+  # the active bottle of the same type was deleted (its remaining time is lost). %old% %remaining% %multiplier%
+  replaced: '<muted>Boost <type>%type_name% x%old%<muted> cũ (còn <text>%remaining%<muted>) đã được thay bằng <type>x%multiplier%'
+  # %effective% = current multiplier, %after% = multiplier if this bottle were used now
+  confirm: '<error>✘ Boost hiện tại của bạn là <text>x%effective%<error>, nếu sử dụng boost này bây giờ sẽ vô tác dụng. Sử dụng lại trong %seconds% giây nếu vẫn muốn dùng'
+  used-no-effect: '<muted>Đã sử dụng Boost %type_name% x%multiplier%, boost không có tác dụng'
+  invalid: '<error>✘ Chai boost này không còn hợp lệ, hãy liên hệ quản trị viên'
+  expired: '<muted>Boost <type>%type_name% x%multiplier% <muted>của bạn đã hết hạn'
+  gamemode: '<error>✘ Không thể dùng boost ở chế độ chơi này'
+
+# Bottle item. Placeholders: %type% %type_name% %multiplier% %duration% %description% %click%
+# Name and lore are display only, the plugin never reads them back
+bottle-item:
+  name: '<type>Boost %type_name% x%multiplier%'
+  lore:
+    - '<text>%description%'
+    - '<muted>• Loại: <text>%type%'
+    - '<muted>• Multiple: <text>x%multiplier%'
+    - '<muted>• Thời gian: <text>%duration%'
+    - ''
+    - '<accent>(!) <muted>Hướng dẫn sử dụng tại <text>/booster'
+    - '<muted>%click% để sử dụng vật phẩm'
+
+give:
+  done: '<success>✔ Đã tặng <text>%amount% <type>Boost %type_name% x%multiplier% <muted>(%duration%) <success>cho <text>%player%'
+  received: '<success>✔ Bạn nhận được <text>%amount% <type>Boost %type_name% x%multiplier%'
+
+global:
+  started: '<accent>Boost toàn server <type>%type_name% x%multiplier% <accent>đã bắt đầu trong <text>%duration%'
+  # second line broadcast right after 'started' (also on replace), '' disables it
+  no-stack-note: '<muted>Boost global không cộng dồn với multiple rank và booster cá nhân'
+  replaced: '<muted>Đã thay boost toàn server %type_name% x%old% bằng x%multiplier%'
+  stopped: '<muted>Boost toàn server %type_name% đã kết thúc'
+  not-active: '<error>✘ Không có boost toàn server nào cho loại <text>%type%'
+
+error:
+  unknown-type: '<error>✘ Loại boost không tồn tại: <text>%type%'
+  multiplier: '<error>✘ Bội số phải là số nguyên từ 2 đến %max%'
+  duration: '<error>✘ Thời gian không hợp lệ, ví dụ: 30s, 10m, 1h30m (tối đa %max%)'
+  player-offline: '<error>✘ Người chơi <text>%player% <error>không trực tuyến'
+  amount: '<error>✘ Số lượng phải là số nguyên từ 1 đến 64'
+
+command:
+  usage: '<muted>Cách dùng: <text>%usage%'
+  no-permission: '<error>✘ Bạn không có quyền làm điều này'
+  error: '<error>✘ Đã xảy ra lỗi, thao tác đã bị hủy'
+
+reload:
+  done: '<success>✔ Đã tải lại BoxCore'
+  failed: '<error>✘ Tải lại thất bại, xem console; cấu hình cũ được giữ nguyên'
+
+# Bossbar titles. %remaining% is HH:MM:SS (>= 1 hour) or MM:SS
+# Only the "Boost ... x..." part is bold; separators, time and suffixes are not
+bossbar:
+  global: '<bold><type>Boost toàn server %type_name% x%multiplier%</bold> <muted>• còn <text>%remaining%'
+  personal: '<bold><type>Boost %type_name% x%multiplier%</bold> <muted>• còn <text>%remaining%'
+  # appended when a global boost determines the effective value (global > rank + bottle)
+  personal-suffix: ' <muted>• đang dùng <text>x%effective%'
+  # appended when the bottle is stacked with a rank (and no higher global)
+  personal-suffix-total: ' <muted>• tổng <text>x%effective%'
+
+# /boxcore check <player> (admin, no prefix). %time% uses config.yml timezone
+# rank = R (0 = none), bottle = B (0 = none), personal = max(R + B, 1), effective = min(max(personal, global, 1), max)
+check:
+  header: '<accent>Boost của <text>%player%'
+  type: '<muted>• <type>%type_name% <muted>(%type%) hiệu lực <accent>x%effective%'
+  sum: '<muted>  • Rank <text>x%rank% <muted>+ chai <text>x%bottle% <muted>= cá nhân <text>x%personal%'
+  global: '<muted>  • Global <text>x%multiplier% <muted>(còn <text>%remaining%<muted>, hết hạn %time%)'
+  global-used: '<muted>  • Global <text>x%multiplier% <muted>(còn <text>%remaining%<muted>, hết hạn %time%) → <accent>đang dùng global'
+  global-none: '<muted>  • Global: <text>không có'
+  bottle: '<muted>  • Chai: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%)'
+  bottle-none: '<muted>  • Chai: <text>không có'
+  capped: '<muted>  • Giới hạn tối đa <text>x%max%'
+
+# /booster guide (no prefix). %click% follows bottle.use-click
+booster:
+  guide:
+    - '<accent>Hướng dẫn Booster'
+    - '<muted>• <text>%click% vào chai boost để kích hoạt'
+    - '<muted>• <text>Boost Mining tăng vật phẩm khi đào, Boost Quest tăng phần thưởng nhiệm vụ'
+    - '<muted>• <text>Multiple rank cộng dồn với booster cá nhân (chỉ tính chai cao nhất đang chạy)'
+    - '<muted>• <text>Boost global không cộng dồn với multiple rank và booster cá nhân'
+    - '<muted>• <text>Thời gian tính theo giờ thực, vẫn trôi khi bạn thoát game'
+    - '<muted>• <text>Boost đang chạy hiển thị trên thanh bossbar'
