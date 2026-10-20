@@ -113,7 +113,7 @@ public final class BossBarService {
                 "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(gb.boost.expiresAt(), now)));
         if (title.equals(gb.title)) return;
         gb.title = title;
-        gb.bar.name(messages.get().parse(type, title));
+        gb.bar.name(messages.get().parseStyled(type, title));
         gb.bar.progress(gb.boost.progress(now));
     }
 
@@ -181,7 +181,7 @@ public final class BossBarService {
         }
         if (title.equals(pb.title)) return;
         pb.title = title;
-        pb.bar.name(msg.parse(type, title));
+        pb.bar.name(msg.parseStyled(type, title));
         pb.bar.progress(pb.boost.progress(now));
     }
 

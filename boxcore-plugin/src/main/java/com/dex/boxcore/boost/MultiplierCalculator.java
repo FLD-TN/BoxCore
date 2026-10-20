@@ -46,6 +46,16 @@ public final class MultiplierCalculator {
         return after > current && m > active;
     }
 
+    /**
+     * A bottle with the same multiplier as the active bottle renews it: the active bottle is deleted (its remaining
+     * time is lost) and the new one starts with its full duration, whatever the rank or global values.
+     *
+     * @param active the active bottle's multiplier (0 if none)
+     */
+    public static boolean isRenewal(int active, int m) {
+        return active > 0 && m == active;
+    }
+
     /** True when the global boost alone determines the value ({@code G > personal}). */
     public static boolean globalWins(int rank, int bottle, int global) {
         return global > personal(rank, bottle);

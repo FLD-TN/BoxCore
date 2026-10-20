@@ -3,24 +3,36 @@ version: '${version}'
 main: com.dex.boxcore.BoxCorePlugin
 api-version: '1.21'
 author: Dex
-description: Core services for the BoxPvP server (boosts)
+description: Core services for the BoxPvP server (boosts, gems)
 softdepend: [PlaceholderAPI]
 
 commands:
   boxcore:
-    description: BoxCore admin commands (give, global, reload, check)
-    usage: /boxcore <give|global|reload|check>
+    description: BoxCore admin commands (give, global, gem, reload, check)
+    usage: /boxcore <give|global|gem|reload|check>
   booster:
     description: Boost usage guide
     usage: /booster
+  gem:
+    description: Số dư, chuyển và bảng xếp hạng Gem
+    usage: /gem [pay <player> <amount>|top]
+    aliases: [gems, ngoc]
 
 permissions:
   boxcore.use:
     description: Use boost bottles and /booster
     default: true
+  boxcore.gem.use:
+    description: /gem and /gem top
+    default: true
+  boxcore.gem.pay:
+    description: /gem pay (grant with LuckPerms)
+    default: false
   boxcore.admin:
     description: All /boxcore sub-commands
     default: op
     children:
       boxcore.use: true
+      boxcore.gem.use: true
+      boxcore.gem.pay: true
   # boxcore.boost.<type>.<n> are dynamic rank permissions, no declaration needed

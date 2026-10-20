@@ -1,7 +1,7 @@
 package com.dex.boxcore.config;
 
+import com.dex.boxcore.gem.GemConfig;
 import com.dex.boxcore.util.DurationFormat;
-import com.dex.boxcore.util.SmallCaps;
 import net.kyori.adventure.bossbar.BossBar;
 import net.kyori.adventure.key.InvalidKeyException;
 import net.kyori.adventure.key.Key;
@@ -52,15 +52,19 @@ public final class CoreConfig {
     private final int useCooldownTicks;
     private final int confirmWindowSeconds;
     private final Key successSound;
+    private final int descriptionWidth;
     private final int permissionRefreshSeconds;
     private final int saveDebounceSeconds;
     private final ZoneId timezone;
     private final boolean smallCaps;
     private final Map<String, TextColor> palette;
+    private final GemConfig gem;
 
     private CoreConfig(Map<String, BoostType> types, Material bottleMaterial, UseClick useClick,
-                       int useCooldownTicks, int confirmWindowSeconds, Key successSound, int permissionRefreshSeconds,
-                       int saveDebounceSeconds, ZoneId timezone, boolean smallCaps, Map<String, TextColor> palette) {
+                       int useCooldownTicks, int confirmWindowSeconds, Key successSound, int descriptionWidth,
+                       int permissionRefreshSeconds,
+                       int saveDebounceSeconds, ZoneId timezone, boolean smallCaps, Map<String, TextColor> palette,
+                       GemConfig gem) {
         this.types = Collections.unmodifiableMap(types);
         this.typeList = List.copyOf(types.values());
         this.bottleMaterial = bottleMaterial;
@@ -68,11 +72,13 @@ public final class CoreConfig {
         this.useCooldownTicks = useCooldownTicks;
         this.confirmWindowSeconds = confirmWindowSeconds;
         this.successSound = successSound;
+        this.descriptionWidth = descriptionWidth;
         this.permissionRefreshSeconds = permissionRefreshSeconds;
         this.saveDebounceSeconds = saveDebounceSeconds;
         this.timezone = timezone;
         this.smallCaps = smallCaps;
         this.palette = Collections.unmodifiableMap(palette);
+        this.gem = gem;
     }
 
     /**
@@ -97,7 +103,7 @@ public final class CoreConfig {
         Warn warn = new Warn(logger);
 
         // style first: type names and descriptions are styled at load
-        boolean smallCaps = bool(yaml, "style.small-caps", true, warn);
+        boolean smallCaps = bool(yaml, "style.small-caps", false, warn);
         Map<String, TextColor> palette = new LinkedHashMap<>();
         for (Map.Entry<String, String> e : DEFAULT_PALETTE.entrySet()) {
             String key = "style.palette." + e.getKey();
@@ -116,7 +122,7 @@ public final class CoreConfig {
             logger.warning("[" + FILE + "] 'types' section is missing, no boost type is declared");
         } else {
             for (String id : typesSection.getKeys(false)) {
-                BoostType type = parseType(typesSection, id, types.size(), smallCaps, warn, logger);
+                BoostType type = parseType(typesSection, id, types.size(), warn, logger);
                 if (type != null) types.put(id, type);
             }
         }
@@ -143,7 +149,7 @@ public final class CoreConfig {
         }
 
         int cooldown = integer(yaml, "bottle.use-cooldown-ticks", 10, 0, 1200, warn);
-        int confirmWindow = integer(yaml, "bottle.confirm-window-seconds", 5, 1, 60, warn);
+        int confirmWindow = integer(yaml, "bottle.confirm-window-seconds", 3, 1, 60, warn);
         Key sound = Key.key("minecraft", "entity.player.levelup");
         Object rawSound = yaml.get("bottle.success-sound");
         if (rawSound != null) {
@@ -158,6 +164,7 @@ public final class CoreConfig {
                 }
             }
         }
+        int descriptionWidth = integer(yaml, "bottle.description-width", 25, 0, 200, warn);
         int permRefresh = integer(yaml, "permission-refresh-seconds", 30, 5, 3600, warn);
         int debounce = integer(yaml, "storage.save-debounce-seconds", 5, 1, 300, warn);
 
@@ -171,11 +178,14 @@ public final class CoreConfig {
             }
         }
 
-        return new CoreConfig(types, material, useClick, cooldown, confirmWindow, sound, permRefresh, debounce,
-                zone, smallCaps, palette);
+        GemConfig gem = GemConfig.parse(yaml, logger);
+
+        return new CoreConfig(types, material, useClick, cooldown, confirmWindow, sound, descriptionWidth, permRefresh,
+                debounce,
+                zone, smallCaps, palette, gem);
     }
 
-    private static BoostType parseType(ConfigurationSection section, String id, int index, boolean smallCaps,
+    private static BoostType parseType(ConfigurationSection section, String id, int index,
                                        Warn warn, Logger logger) {
         String path = "types." + id;
         if (!TYPE_ID.matcher(id).matches()) {
@@ -221,10 +231,6 @@ public final class CoreConfig {
                 warn.invalid(path + ".bossbar-color", rawColor, "WHITE");
             }
         }
-        if (smallCaps) {
-            displayName = SmallCaps.convert(displayName);
-            description = SmallCaps.convert(description);
-        }
         return new BoostType(id, index, displayName, description, max, maxDuration, textColor, color);
     }
 
@@ -260,8 +266,12 @@ public final class CoreConfig {
     public int confirmWindowSeconds() { return confirmWindowSeconds; }
     /** Sound played on a successful activation, {@code null} if disabled. */
     public Key successSound() { return successSound; }
+    /** Characters per lore line for the type description, 0 = no wrapping. */
+    public int descriptionWidth() { return descriptionWidth; }
     public int permissionRefreshSeconds() { return permissionRefreshSeconds; }
     public int saveDebounceSeconds() { return saveDebounceSeconds; }
+    /** The {@code gem} section (Update 03). */
+    public GemConfig gem() { return gem; }
     public ZoneId timezone() { return timezone; }
     public boolean smallCaps() { return smallCaps; }
     public Map<String, TextColor> palette() { return palette; }

@@ -73,8 +73,13 @@ class MultiplierCalculatorTest {
     }
 
     @Test
-    void sameMultiplierIsNoEffect() {
+    void sameMultiplierRenewsActive() {
         assertFalse(MultiplierCalculator.isUseful(0, 5, 0, 5, MAX));
+        assertTrue(MultiplierCalculator.isRenewal(5, 5));
+        // even when a global boost determines the value
+        assertTrue(MultiplierCalculator.isRenewal(10, 10));
+        assertFalse(MultiplierCalculator.isRenewal(10, 9));
+        assertFalse(MultiplierCalculator.isRenewal(0, 0));
     }
 
     @Test

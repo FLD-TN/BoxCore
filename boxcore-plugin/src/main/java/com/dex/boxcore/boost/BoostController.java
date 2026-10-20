@@ -133,6 +133,8 @@ public final class BoostController implements Listener {
                 if (type == null) continue;
                 msg.send(player, type, "bottle.expired", "type", type.id(), "type_name", type.displayName(),
                         "multiplier", b.multiplier());
+                msg.title(player, type, "bottle.expired-title", "bottle.expired-subtitle", "type", type.id(),
+                        "type_name", type.displayName(), "multiplier", b.multiplier());
             }
             if (expiredGlobals.isEmpty()) refresh(player, now);
         }

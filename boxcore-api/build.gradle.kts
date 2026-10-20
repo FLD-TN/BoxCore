@@ -3,9 +3,9 @@ plugins {
     `maven-publish`
 }
 
-// The API signatures did not change in BoxCore 1.1.0: the artifact stays com.dex:boxcore-api:1.0.0,
-// so consumers built against it need no change.
-version = "1.0.0"
+// 1.1.0 (BoxCore 1.3.0) only adds GemService and GemResult; BoostService and BoostTypes are unchanged,
+// so consumers built against 1.0.0 need no change.
+version = "1.1.0"
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
@@ -25,7 +25,7 @@ publishing {
             from(components["java"])
             pom {
                 name.set("BoxCore API")
-                description.set("Public API of the BoxCore plugin (boosts)")
+                description.set("Public API of the BoxCore plugin (boosts, gems)")
             }
         }
     }

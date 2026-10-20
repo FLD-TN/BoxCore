@@ -1,5 +1,6 @@
 package com.dex.boxcore.command;
 
+import com.dex.boxcore.api.GemResult;
 import com.dex.boxcore.boost.BoostController;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.boost.GlobalBoost;
@@ -8,10 +9,15 @@ import com.dex.boxcore.boost.PersonalBoost;
 import com.dex.boxcore.config.BoostType;
 import com.dex.boxcore.config.CoreConfig;
 import com.dex.boxcore.config.Messages;
+import com.dex.boxcore.gem.GemConfig;
+import com.dex.boxcore.gem.GemDatabase;
+import com.dex.boxcore.gem.GemFormat;
+import com.dex.boxcore.gem.GemLedger;
 import com.dex.boxcore.item.BoostItemFactory;
 import com.dex.boxcore.util.DurationFormat;
 import com.dex.boxcore.util.ErrorReporter;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -23,23 +29,30 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/** {@code /boxcore give|global|reload|check} (§10). Every sub-command works from the console. */
+/** {@code /boxcore give|global|gem|reload|check} (§10, Update 03 §5.1). Every sub-command works from the console. */
 public final class BoxCoreCommand implements TabExecutor {
 
     public static final String ADMIN = "boxcore.admin";
 
-    private static final String USAGE_ROOT = "/boxcore <give|global|reload|check>";
+    private static final String USAGE_ROOT = "/boxcore <give|global|gem|reload|check>";
     private static final String USAGE_GIVE = "/boxcore give <player> <type> <multiplier> <duration> [amount]";
     private static final String USAGE_GLOBAL = "/boxcore global <start|stop> <type> [multiplier] [duration]";
     private static final String USAGE_GLOBAL_START = "/boxcore global start <type> <multiplier> <duration>";
     private static final String USAGE_GLOBAL_STOP = "/boxcore global stop <type>";
     private static final String USAGE_RELOAD = "/boxcore reload";
     private static final String USAGE_CHECK = "/boxcore check <player>";
+    private static final String USAGE_GEM = "/boxcore gem <give|take|set|check> <player> [amount] [reason] [-s]";
+    private static final String USAGE_GEM_CHECK = "/boxcore gem check <player>";
+    private static final String SILENT = "-s";
+    private static final int CHECK_ROWS = 5;
 
-    private static final List<String> SUBCOMMANDS = List.of("give", "global", "reload", "check");
+    private static final List<String> SUBCOMMANDS = List.of("give", "global", "gem", "reload", "check");
+    private static final List<String> GEM_ACTIONS = List.of("give", "take", "set", "check");
+    private static final List<String> GEM_AMOUNTS = List.of("10", "100", "1000");
     private static final List<String> MULTIPLIERS = List.of("2", "3", "5", "10");
     private static final List<String> DURATIONS = List.of("10m", "30m", "1h");
     private static final List<String> AMOUNTS = List.of("1", "16", "32", "64");
@@ -50,15 +63,18 @@ public final class BoxCoreCommand implements TabExecutor {
     private final BoostController controller;
     private final BoostItemFactory factory;
     private final Consumer<CommandSender> reload;
+    private final GemLedger gems;
     private final ErrorReporter errors;
 
     public BoxCoreCommand(Supplier<CoreConfig> config, Supplier<Messages> messages, BoostController controller,
-                          BoostItemFactory factory, Consumer<CommandSender> reload, ErrorReporter errors) {
+                          BoostItemFactory factory, Consumer<CommandSender> reload, GemLedger gems,
+                          ErrorReporter errors) {
         this.config = config;
         this.messages = messages;
         this.controller = controller;
         this.factory = factory;
         this.reload = reload;
+        this.gems = gems;
         this.errors = errors;
     }
 
@@ -81,6 +97,7 @@ public final class BoxCoreCommand implements TabExecutor {
                     else reload.accept(sender);
                 }
                 case "check" -> check(sender, args);
+                case "gem" -> gem(sender, args);
                 default -> usage(sender, USAGE_ROOT);
             }
         } catch (Throwable t) {
@@ -245,6 +262,172 @@ public final class BoxCoreCommand implements TabExecutor {
         }
     }
 
+    // ------------------------------------------------------------------ gem (Update 03 §5.1)
+
+    private void gem(CommandSender sender, String[] args) {
+        Messages msg = messages.get();
+        if (args.length < 3) {
+            usage(sender, USAGE_GEM);
+            return;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        if (!GEM_ACTIONS.contains(action)) {
+            usage(sender, USAGE_GEM);
+            return;
+        }
+        if (!gems.enabled()) {
+            msg.send(sender, "gem.disabled");
+            return;
+        }
+        if (action.equals("check")) {
+            if (args.length != 3) usage(sender, USAGE_GEM_CHECK);
+            else gemCheck(sender, args[2]);
+            return;
+        }
+        if (args.length < 4) {
+            usage(sender, USAGE_GEM);
+            return;
+        }
+        GemLedger.Action kind = switch (action) {
+            case "give" -> GemLedger.Action.GIVE;
+            case "take" -> GemLedger.Action.TAKE;
+            default -> GemLedger.Action.SET;
+        };
+        GemConfig cfg = gems.config();
+        long amount = GemFormat.parseAmount(args[3]);
+        long min = kind == GemLedger.Action.SET ? 0 : 1;
+        if (amount < min || amount > cfg.maxBalance()) {
+            msg.send(sender, "gem.error.amount", "max", GemFormat.grouped(cfg.maxBalance()));
+            return;
+        }
+        boolean silent = false;
+        String reason = null;
+        for (int i = 4; i < args.length; i++) {
+            if (args[i].equalsIgnoreCase(SILENT)) {
+                silent = true;
+            } else if (reason == null) {
+                reason = args[i];
+            } else {
+                usage(sender, USAGE_GEM);
+                return;
+            }
+        }
+        if (reason == null) {
+            String by = sender instanceof Player p ? p.getName() : "console";
+            reason = "admin:" + by + ":" + action;
+        }
+
+        Player online = Bukkit.getPlayerExact(args[2]);
+        if (online != null && gems.isLoaded(online.getUniqueId())) {
+            GemLedger.Change change = gems.change(online.getUniqueId(), kind, amount, reason);
+            gemReply(sender, kind, online.getName(), online.getUniqueId(), amount, change, silent);
+            return;
+        }
+        // offline, or online but not loaded yet: through the database (§3.4)
+        UUID id;
+        String name;
+        if (online != null) {
+            id = online.getUniqueId();
+            name = online.getName();
+        } else {
+            OfflinePlayer known = Bukkit.getOfflinePlayerIfCached(args[2]);
+            if (known == null) {
+                msg.send(sender, "gem.error.unknown-player", "player", args[2]);
+                return;
+            }
+            id = known.getUniqueId();
+            name = known.getName() != null ? known.getName() : args[2];
+        }
+        boolean quiet = silent;
+        gems.changeStored(id, name, kind, amount, reason)
+                .thenAccept(change -> gemReply(sender, kind, name, id, amount, change, quiet));
+    }
+
+    /** Replies to the admin and, unless silent, notifies the target if online. Main thread. */
+    private void gemReply(CommandSender sender, GemLedger.Action kind, String name, UUID id, long amount,
+                          GemLedger.Change change, boolean silent) {
+        try {
+            Messages msg = messages.get();
+            String text = GemFormat.grouped(amount);
+            if (change.result() != GemResult.SUCCESS) {
+                switch (change.result()) {
+                    case INSUFFICIENT_FUNDS -> msg.send(sender, "gem.admin.insufficient", "player", name,
+                            "balance", GemFormat.grouped(change.balance()));
+                    case BALANCE_LIMIT -> msg.send(sender, "gem.admin.limit", "player", name,
+                            "max", GemFormat.grouped(gems.config().maxBalance()));
+                    case INVALID_AMOUNT -> msg.send(sender, "gem.error.amount",
+                            "max", GemFormat.grouped(gems.config().maxBalance()));
+                    default -> msg.send(sender, gems.enabled() ? "command.error" : "gem.disabled");
+                }
+                return;
+            }
+            String balance = GemFormat.grouped(change.balance());
+            Player target = Bukkit.getPlayer(id);
+            switch (kind) {
+                case GIVE -> {
+                    msg.send(sender, "gem.admin.given", "amount", text, "player", name, "balance", balance);
+                    if (!silent && target != null) msg.notify(target, "gem.received", "amount", text);
+                }
+                case TAKE -> {
+                    msg.send(sender, "gem.admin.taken", "amount", text, "player", name, "balance", balance);
+                    if (!silent && target != null) msg.notify(target, "gem.taken", "amount", text);
+                }
+                case SET -> {
+                    msg.send(sender, "gem.admin.set", "amount", text, "player", name);
+                    if (!silent && target != null && change.delta() != 0) msg.notify(target, "gem.set", "amount", text);
+                }
+            }
+        } catch (Throwable t) {
+            errors.report("gem command reply", t);
+        }
+    }
+
+    private void gemCheck(CommandSender sender, String rawName) {
+        Messages msg = messages.get();
+        Player online = Bukkit.getPlayerExact(rawName);
+        UUID id;
+        String name;
+        if (online != null) {
+            id = online.getUniqueId();
+            name = online.getName();
+        } else {
+            OfflinePlayer known = Bukkit.getOfflinePlayerIfCached(rawName);
+            if (known == null) {
+                msg.send(sender, "gem.error.unknown-player", "player", rawName);
+                return;
+            }
+            id = known.getUniqueId();
+            name = known.getName() != null ? known.getName() : rawName;
+        }
+        gems.check(id, CHECK_ROWS).whenComplete((check, error) -> {
+            try {
+                Messages m = messages.get();
+                if (error != null) {
+                    errors.report("gem check", error);
+                    m.send(sender, "command.error");
+                    return;
+                }
+                long balance = check.balance() == null ? 0 : check.balance();
+                m.sendLine(sender, m.raw("gem.admin.check-header"), "player", name,
+                        "balance", GemFormat.grouped(balance));
+                if (check.recent().isEmpty()) {
+                    m.sendLine(sender, m.raw("gem.admin.check-empty"));
+                    return;
+                }
+                DateTimeFormatter clock = CLOCK.withZone(config.get().timezone());
+                for (GemDatabase.TxRow row : check.recent()) {
+                    m.sendLine(sender, m.raw("gem.admin.check-line"),
+                            "time", clock.format(Instant.ofEpochMilli(row.at())),
+                            "delta", GemFormat.signed(row.delta()),
+                            "balance", GemFormat.grouped(row.balanceAfter()),
+                            "reason", row.reason());
+                }
+            } catch (Throwable t) {
+                errors.report("gem check reply", t);
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ argument parsing
 
     private BoostType type(CommandSender sender, String raw) {
@@ -331,6 +514,15 @@ public final class BoxCoreCommand implements TabExecutor {
                 yield List.of();
             }
             case "check" -> args.length == 2 ? filter(players(), args[1]) : List.of();
+            case "gem" -> {
+                boolean check = args[1].equalsIgnoreCase("check");
+                yield switch (args.length) {
+                    case 2 -> filter(GEM_ACTIONS, args[1]);
+                    case 3 -> filter(players(), args[2]);
+                    case 4 -> check ? List.of() : filter(GEM_AMOUNTS, args[3]);
+                    default -> check ? List.of() : filter(List.of(SILENT), args[args.length - 1]);
+                };
+            }
             default -> List.of();
         };
     }

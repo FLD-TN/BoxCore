@@ -47,9 +47,15 @@ bottle:
   use-click: RIGHT
   # Minimum ticks between two uses by the same player (20 ticks = 1 second)
   use-cooldown-ticks: 10
-  # A bottle that would have no effect (not higher than the current multiplier) is only consumed
-  # if used a second time within this many seconds
-  confirm-window-seconds: 5
+  # A bottle is used at once only when the player has no active bottle of its type and it raises the multiplier.
+  # Otherwise the first use only warns (messages.yml bottle.confirm-same / -higher / -lower / -no-effect) and the
+  # bottle is consumed only if used a second time within this many seconds; after that the warning starts over.
+  # Same or higher multiplier: replaces the active bottle (its remaining time is lost).
+  # Lower or no effect: consumed without effect, the active bottle is kept
+  confirm-window-seconds: 3
+  # The type description in the bottle lore is wrapped onto several lines of at most this many characters
+  # (breaking between words), 0 keeps it on one line
+  description-width: 25
   # Sound played on a successful activation (a Minecraft sound key), '' disables it
   success-sound: 'entity.player.levelup'
 
@@ -63,10 +69,39 @@ storage:
   # A save runs at most once every this many seconds after a change
   save-debounce-seconds: 5
 
+# GEM: server currency, stored in plugins/BoxCore/gems.db (SQLite)
+# It is NOT a Vault economy: the main money plugin keeps Vault. Commands: /gem, /gem pay, /gem top,
+# /boxcore gem give|take|set|check. /gem pay needs the permission boxcore.gem.pay (grant it with LuckPerms)
+gem:
+  # Name shown in messages and placeholders, and its colour ('#RRGGBB')
+  display-name: 'Gem'
+  color: '#8245F8'
+  # Balance of a player the first time BoxCore sees them
+  starting-balance: 0
+  # Largest balance a player can hold (at most 1000000000000)
+  max-balance: 1000000000000
+  pay:
+    # Smallest amount for /gem pay
+    min-amount: 1
+    # Seconds between two successful /gem pay of the same player
+    cooldown-seconds: 3
+  top:
+    # Number of players in /gem top and %boxcore_gem_top_<n>_...% (1..100)
+    size: 10
+    # How often the leaderboard is rebuilt, in seconds (at least 10)
+    refresh-seconds: 60
+    # Player names left out of the leaderboard (e.g. staff test accounts)
+    exclude: []
+  # Shown by the balance placeholders while a player is offline or not loaded yet
+  placeholder-unknown: '-'
+  # Transactions older than this many days are deleted on startup, 0 keeps them forever
+  log-keep-days: 180
+
 # Server-wide text style shared with the other in-house plugins
 style:
-  # Convert plugin-authored text to small caps (a–z only; tags and placeholders are never converted)
-  small-caps: true
+  # Convert bottle item names/lore and bossbar titles to small caps (a–z only; tags are never converted).
+  # Chat messages always use the normal font
+  small-caps: false
   palette:
     text: '#FFFFFF'
     muted: '#C8C8C8'

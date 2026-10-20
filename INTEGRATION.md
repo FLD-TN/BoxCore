@@ -1,8 +1,10 @@
-# BoxCore — Integration Guide (BoxCore 1.1.0, API 1.0.0)
+# BoxCore — Integration Guide (BoxCore 1.3.0, API 1.1.0)
 
 This is the only document you need to integrate a plugin with BoxCore. Do not modify BoxCore; use the API below.
 
-BoxCore 1.1.0 changed how the multiplier is computed on the server side, but the API did not change: it is still `com.dex:boxcore-api:1.0.0` and it still returns one integer `>= 1`. Plugins built against `boxcore-api-1.0.0` need no change.
+BoxCore 1.1.0 changed how the multiplier is computed on the server side, but the boost API did not change: it still returns one integer `>= 1`.
+
+BoxCore 1.3.0 adds the **GEM** currency and API `com.dex:boxcore-api:1.1.0`, which only **adds** `GemService` and `GemResult` (§10). `BoostService` and `BoostTypes` are unchanged: plugins built against `boxcore-api-1.0.0` need no change and no rebuild. Use 1.1.0 only if you need gems.
 
 ## 1. What BoxCore does
 
@@ -16,8 +18,8 @@ BoxCore is the core plugin of the BoxPvP server. Version 1 provides **boosts**: 
 
 | Item | Value |
 |---|---|
-| API jar | `boxcore-api-1.0.0.jar` |
-| Maven coordinates | `com.dex:boxcore-api:1.0.0` |
+| API jar | `boxcore-api-1.1.0.jar` (boosts only: `1.0.0` still works) |
+| Maven coordinates | `com.dex:boxcore-api:1.1.0` |
 | Java | 21 |
 | Repository | `mavenLocal()` (installed with `publishToMavenLocal` from the BoxCore repository) |
 
@@ -29,7 +31,7 @@ The API is **compile-only**. Never shade or relocate it into your jar: the BoxCo
 <dependency>
     <groupId>com.dex</groupId>
     <artifactId>boxcore-api</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <scope>provided</scope>
 </dependency>
 ```
@@ -37,7 +39,7 @@ The API is **compile-only**. Never shade or relocate it into your jar: the BoxCo
 Maven resolves `~/.m2/repository` automatically. If you only have the jar file, install it first:
 
 ```
-mvn install:install-file -Dfile=boxcore-api-1.0.0.jar -DgroupId=com.dex -DartifactId=boxcore-api -Dversion=1.0.0 -Dpackaging=jar
+mvn install:install-file -Dfile=boxcore-api-1.1.0.jar -DgroupId=com.dex -DartifactId=boxcore-api -Dversion=1.1.0 -Dpackaging=jar
 ```
 
 **Gradle (Kotlin DSL)**
@@ -48,7 +50,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("com.dex:boxcore-api:1.0.0")
+    compileOnly("com.dex:boxcore-api:1.1.0")
 }
 ```
 
@@ -62,7 +64,7 @@ softdepend: [BoxCore]
 
 ## 4. API source and guarantees
 
-The API contains exactly two classes in package `com.dex.boxcore.api`.
+The boost API is the two classes below, in package `com.dex.boxcore.api`. The gem classes are in §10.
 
 ```java
 package com.dex.boxcore.api;
@@ -235,3 +237,89 @@ Every value `/boxcore check` shows as effective is exactly what `getMultiplier` 
 | BoxQuest (`BoxQuest`) | `quest` | the money reward when a quest completes |
 
 Use only your own type id. Types are declared in BoxCore's `config.yml`; `isType(type)` tells you whether it is declared on this server (an undeclared type simply yields multiplier 1).
+
+## 10. Gems (API 1.1.0)
+
+BoxCore 1.3.0 owns a server currency called **GEM**: integer balances per player, stored by BoxCore (SQLite). It is **not** a Vault economy; Vault stays with the server's main money plugin. Players earn gems through admin/console commands (`boxcore gem give <player> <amount> [reason] [-s]`, e.g. from quest rewards) and your plugin can spend or grant them through `GemService`.
+
+```java
+package com.dex.boxcore.api;
+
+import java.util.UUID;
+
+public interface GemService {
+    /** Balance of an online, loaded player, or -1 if not loaded (offline, still loading, or storage disabled). Any thread. */
+    long balance(UUID playerId);
+    /** True if balance() returns a real value for this player. Any thread. */
+    boolean isLoaded(UUID playerId);
+    /** Adds amount (>= 1). Main thread only (throws IllegalStateException otherwise). */
+    GemResult deposit(UUID playerId, long amount, String reason);
+    /** Removes amount (>= 1) only if the balance is sufficient; all or nothing. Main thread only. */
+    GemResult withdraw(UUID playerId, long amount, String reason);
+    /** Configured display name, e.g. "Gem". */
+    String displayName();
+    /** Formats an amount the way BoxCore displays it, e.g. "1.250". */
+    String format(long amount);
+}
+
+public enum GemResult { SUCCESS, INSUFFICIENT_FUNDS, BALANCE_LIMIT, NOT_LOADED, INVALID_AMOUNT }
+```
+
+Guarantees:
+
+- Amounts are `long` integers. A balance is never negative and never above the server's maximum (at most 10^12).
+- **Only online players whose data is loaded** can be read or changed. Data loads before the player joins; a player can still be "not loaded" for a moment if the database was slow. Treat `NOT_LOADED` as "try again later", never as a zero balance.
+- `withdraw` checks and subtracts in **one call**. Do not call `balance()` and then decide: call `withdraw` and read the result.
+- A `deposit` of an amount you just withdrew successfully in the same tick never fails with `BALANCE_LIMIT` or `INSUFFICIENT_FUNDS`: use it to roll back.
+- `SUCCESS` is final for you: BoxCore applied the change in memory and queued it to disk.
+- `deposit` / `withdraw` must run on the **main thread**; `balance` / `isLoaded` may run on any thread.
+- After BoxCore disables (server stop, plugman), a `GemService` reference you kept answers `-1` / `NOT_LOADED` to everything; it never changes a balance again. Call `init()` again on `PluginEnableEvent` of BoxCore to get the new service.
+
+**Reason**: a short machine-readable origin written to BoxCore's transaction log, e.g. `shopkeeper:tier_shop/t1`. Allowed characters `[a-z0-9_:./-]`, at most 64; anything else is lower-cased, replaced by `_` and truncated. Use `<your plugin>:<detail>`. A null or blank reason returns `INVALID_AMOUNT`.
+
+**Hook pattern**: the same as §5. Keep every `GemService` reference inside your hook class and load it only when BoxCore is enabled:
+
+```java
+// Only this class references com.dex.boxcore.api. Load it only if BoxCore is enabled.
+public final class BoxCoreGems {
+    private static GemService gems;
+
+    public static void init() {
+        gems = Bukkit.getPluginManager().isPluginEnabled("BoxCore")
+                ? Bukkit.getServicesManager().load(GemService.class)   // null on BoxCore < 1.3.0
+                : null;
+    }
+
+    public static boolean ready(UUID player) {
+        return gems != null && gems.isLoaded(player);
+    }
+
+    /** Charges a player; false if not loaded or not enough gems (nothing changed). Main thread. */
+    public static boolean charge(UUID player, long amount, String reason) {
+        return gems != null && gems.withdraw(player, amount, reason) == GemResult.SUCCESS;
+    }
+
+    /** Gives back a charge that must be undone (e.g. the rest of a transaction failed). Main thread. */
+    public static void refund(UUID player, long amount, String reason) {
+        if (gems == null) return;
+        GemResult result = gems.deposit(player, amount, reason + ":rollback");
+        if (result != GemResult.SUCCESS) {
+            Bukkit.getLogger().severe("Gem refund failed (" + result + "): " + player + " " + amount + ", compensate manually");
+        }
+    }
+}
+```
+
+Withdraw and roll back:
+
+```java
+if (!BoxCoreGems.charge(player.getUniqueId(), 20, "shopkeeper:tier_shop/t1")) {
+    // not enough gems (or not loaded): refuse, nothing was taken
+    return;
+}
+if (!giveItems(player)) {
+    BoxCoreGems.refund(player.getUniqueId(), 20, "shopkeeper:tier_shop/t1");
+}
+```
+
+Testing: `/boxcore gem give|take|set <player> <amount>` and `/boxcore gem check <player>` (balance and the last 5 transactions with their reasons). With PlaceholderAPI: `%boxcore_gem%`, `%boxcore_gem_formatted%`.

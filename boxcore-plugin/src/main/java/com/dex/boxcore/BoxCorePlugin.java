@@ -1,16 +1,23 @@
 package com.dex.boxcore;
 
 import com.dex.boxcore.api.BoostService;
+import com.dex.boxcore.api.GemService;
 import com.dex.boxcore.boost.BoostController;
 import com.dex.boxcore.boost.BoostRegistry;
 import com.dex.boxcore.boost.BoostServiceImpl;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.command.BoosterCommand;
 import com.dex.boxcore.command.BoxCoreCommand;
+import com.dex.boxcore.command.GemCommand;
 import com.dex.boxcore.config.CoreConfig;
 import com.dex.boxcore.config.Messages;
 import com.dex.boxcore.display.BossBarService;
 import com.dex.boxcore.display.BoxCoreExpansion;
+import com.dex.boxcore.gem.GemDatabase;
+import com.dex.boxcore.gem.GemLedger;
+import com.dex.boxcore.gem.GemServiceImpl;
+import com.dex.boxcore.gem.GemSessionListener;
+import com.dex.boxcore.gem.GemTop;
 import com.dex.boxcore.item.BoostItemFactory;
 import com.dex.boxcore.item.BoostItemReader;
 import com.dex.boxcore.item.BottleKeys;
@@ -25,6 +32,7 @@ import org.bukkit.command.TabExecutor;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -35,6 +43,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Level;
 
 /** BoxCore entry point: wiring only. */
@@ -53,6 +64,12 @@ public final class BoxCorePlugin extends JavaPlugin {
     private BukkitTask permissionTask;
     private int permissionTaskPeriod;
     private Object expansion;
+
+    private GemDatabase gemDb;
+    private GemLedger gems;
+    private GemTop gemTop;
+    private BukkitTask gemTopTask;
+    private int gemTopPeriod;
 
     @Override
     public void onEnable() {
@@ -79,30 +96,55 @@ public final class BoxCorePlugin extends JavaPlugin {
         Bukkit.getServicesManager().register(BoostService.class,
                 new BoostServiceImpl(cache, this::coreConfig, getLogger()), this, ServicePriority.Normal);
 
+        // gems (Update 03): storage, ledger, API; a null database disables the feature, boosts keep working
+        gemDb = GemDatabase.open(new File(getDataFolder(), GemDatabase.FILE), getLogger());
+        gems = new GemLedger(() -> config.gem(), gemDb, this::runOnMain, id -> Bukkit.getPlayer(id) != null,
+                System::currentTimeMillis, getLogger());
+        gemTop = new GemTop(gems, System::currentTimeMillis, getLogger());
+        pruneGemLog(now);
+        Bukkit.getServicesManager().register(GemService.class,
+                new GemServiceImpl(gems, Bukkit::isPrimaryThread), this, ServicePriority.Normal);
+        Map<UUID, Long> payCooldowns = GemSessionListener.newCooldownMap();
+
         Bukkit.getPluginManager().registerEvents(controller, this);
+        Bukkit.getPluginManager().registerEvents(new GemSessionListener(gems, payCooldowns, errors), this);
         Bukkit.getPluginManager().registerEvents(
                 new BottleListener(this::coreConfig, this::messages, controller, reader, errors), this);
-        register("boxcore", new BoxCoreCommand(this::coreConfig, this::messages, controller, factory, this::reload, errors));
+        register("boxcore", new BoxCoreCommand(this::coreConfig, this::messages, controller, factory, this::reload,
+                gems, errors));
         register("booster", new BoosterCommand(this::coreConfig, this::messages, errors));
+        register("gem", new GemCommand(this::messages, gems, gemTop, payCooldowns, errors));
 
         bars.syncGlobals(registry, now);
         for (Player player : Bukkit.getOnlinePlayers()) controller.join(player);
+        Map<UUID, String> online = new LinkedHashMap<>();
+        for (Player player : Bukkit.getOnlinePlayers()) online.put(player.getUniqueId(), player.getName());
+        gems.loadOnline(online);
 
         tickTask = Bukkit.getScheduler().runTaskTimer(this, new TickTask(controller, errors),
                 TickTask.PERIOD_TICKS, TickTask.PERIOD_TICKS);
         schedulePermissionRefresh();
+        scheduleGemTop();
 
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
             registerExpansion();
         }
-        getLogger().info("Enabled with " + config.types().size() + " boost type(s): " + config.types().keySet());
+        getLogger().info("Enabled with " + config.types().size() + " boost type(s): " + config.types().keySet()
+                + (gemDb != null ? ", gems enabled" : ", gems DISABLED (see the errors above)"));
     }
 
     @Override
     public void onDisable() {
+        Bukkit.getServicesManager().unregisterAll(this);
         if (tickTask != null) tickTask.cancel();
         if (permissionTask != null) permissionTask.cancel();
+        if (gemTopTask != null) gemTopTask.cancel();
         Bukkit.getScheduler().cancelTasks(this);
+        if (gems != null) gems.shutdown(); // stale GemService references now refuse every change
+        if (gemDb != null) {
+            gemDb.close(); // runs every queued gem write to completion (Update 03 §3.5)
+            gemDb = null;
+        }
         try {
             if (bars != null) bars.clear();
         } catch (Throwable t) {
@@ -117,7 +159,6 @@ public final class BoxCorePlugin extends JavaPlugin {
             }
             expansion = null;
         }
-        Bukkit.getServicesManager().unregisterAll(this);
         if (cache != null) cache.clear();
         throttle.clear();
     }
@@ -152,6 +193,8 @@ public final class BoxCorePlugin extends JavaPlugin {
         messages = newMessages;
         controller.rebuildDisplay(System.currentTimeMillis());
         if (permissionTaskPeriod != newConfig.permissionRefreshSeconds()) schedulePermissionRefresh();
+        if (gemTopPeriod != newConfig.gem().topRefreshSeconds()) scheduleGemTop();
+        else gemTop.refresh(); // size or exclusions may have changed
         messages.send(sender, "reload.done");
         getLogger().info("Reloaded with " + newConfig.types().size() + " boost type(s): " + newConfig.types().keySet());
     }
@@ -235,6 +278,42 @@ public final class BoxCorePlugin extends JavaPlugin {
         }, period, period);
     }
 
+    /** Leaderboard refresh (Update 03 §5.3) and cleanup of pre-login loads whose player never joined. */
+    private void scheduleGemTop() {
+        if (gemTopTask != null) gemTopTask.cancel();
+        gemTopPeriod = config.gem().topRefreshSeconds();
+        long period = gemTopPeriod * 20L;
+        gemTopTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            try {
+                gemTop.refresh();
+                gems.purgePending();
+            } catch (Throwable t) {
+                errors.report("gem leaderboard refresh", t);
+            }
+        }, 1L, period);
+    }
+
+    /** Deletes transactions older than gem.log-keep-days, on the DB thread (Update 03 §2). */
+    private void pruneGemLog(long now) {
+        int days = config.gem().logKeepDays();
+        if (gemDb == null || days <= 0) return;
+        long before = now - days * 86_400_000L;
+        gemDb.submit(c -> GemDatabase.prune(c, before)).whenComplete((removed, error) -> {
+            if (error != null) getLogger().log(Level.WARNING, "Could not prune old gem transactions", error);
+            else if (removed > 0) getLogger().info("Pruned " + removed + " gem transaction(s) older than " + days + " days");
+        });
+    }
+
+    /** Main-thread executor for gem callbacks; drops tasks once the plugin is disabled. */
+    private void runOnMain(Runnable task) {
+        if (!isEnabled()) return;
+        try {
+            Bukkit.getScheduler().runTask(this, task);
+        } catch (IllegalPluginAccessException ignored) {
+            // disabled between the check and the call
+        }
+    }
+
     private void register(String name, TabExecutor executor) {
         PluginCommand command = getCommand(name);
         if (command == null) {
@@ -247,7 +326,8 @@ public final class BoxCorePlugin extends JavaPlugin {
 
     private void registerExpansion() {
         try {
-            BoxCoreExpansion created = new BoxCoreExpansion(cache, getPluginMeta().getVersion());
+            BoxCoreExpansion created = new BoxCoreExpansion(cache, gems, gemTop, this::messages,
+                    getPluginMeta().getVersion());
             if (created.register()) {
                 expansion = created;
                 getLogger().info("Registered PlaceholderAPI expansion 'boxcore'");

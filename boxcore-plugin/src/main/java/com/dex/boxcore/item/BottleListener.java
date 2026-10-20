@@ -37,10 +37,30 @@ import java.util.function.Supplier;
  */
 public final class BottleListener implements Listener {
 
+    /**
+     * Why a bottle needs a second use; each case has its own warning ({@code bottle.confirm-<case>}).
+     * SAME and HIGHER replace the active bottle once confirmed, LOWER and NO_EFFECT are consumed without effect.
+     */
+    private enum Warning {
+        SAME("bottle.confirm-same", true),
+        HIGHER("bottle.confirm-higher", true),
+        LOWER("bottle.confirm-lower", false),
+        NO_EFFECT("bottle.confirm-no-effect", false);
+
+        final String key;
+        final boolean replaces;
+
+        Warning(String key, boolean replaces) {
+            this.key = key;
+            this.replaces = replaces;
+        }
+    }
+
     /** A warned-about bottle waiting for a second use inside the confirmation window. */
-    private record PendingConfirm(String type, int multiplier, long durationSeconds, long timestamp) {
-        boolean matches(BottleData data) {
-            return type.equals(data.type()) && multiplier == data.multiplier() && durationSeconds == data.durationSeconds();
+    private record PendingConfirm(String type, int multiplier, long durationSeconds, Warning warning, long timestamp) {
+        boolean matches(BottleData data, Warning current) {
+            return type.equals(data.type()) && multiplier == data.multiplier() && durationSeconds == data.durationSeconds()
+                    && warning == current;
         }
     }
 
@@ -162,41 +182,66 @@ public final class BottleListener implements Listener {
         int after = MultiplierCalculator.effective(snapshot.rank(type.id()), m, snapshot.global(type.id()),
                 type.maxMultiplier());
 
-        if (MultiplierCalculator.isUseful(snapshot.rank(type.id()), active, snapshot.global(type.id()), m,
-                type.maxMultiplier())) {
-            // Case A: useful bottle. Consume first, then replace the active bottle of the type (if any).
-            consumeOne(player.getInventory(), hand);
+        boolean useful = MultiplierCalculator.isUseful(snapshot.rank(type.id()), active, snapshot.global(type.id()), m,
+                type.maxMultiplier());
+        Warning warning;
+        if (MultiplierCalculator.isRenewal(active, m)) {
+            warning = Warning.SAME;                       // the active bottle's remaining time would be lost
+        } else if (useful) {
+            warning = active > 0 ? Warning.HIGHER : null; // replaces a running bottle, or nothing to lose
+        } else {
+            warning = active > m ? Warning.LOWER : Warning.NO_EFFECT;
+        }
+
+        if (warning == null) {
             pending.remove(id);
-            PersonalBoost replaced = controller.setPersonal(player, new PersonalBoost(type.id(), m,
-                    now + data.durationSeconds() * 1000L, data.durationSeconds()), now);
-            if (replaced != null) {
-                msg.send(player, type, "bottle.replaced", "type", type.id(), "type_name", type.displayName(),
-                        "old", replaced.multiplier(), "multiplier", m,
-                        "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(replaced.expiresAt(), now)));
-            }
-            msg.send(player, type, "bottle.used", "type", type.id(), "type_name", type.displayName(),
-                    "multiplier", m, "duration", msg.duration(data.durationSeconds()));
-            if (cfg.successSound() != null) {
-                player.playSound(Sound.sound(cfg.successSound(), Sound.Source.PLAYER, 1f, 1f), Sound.Emitter.self());
-            }
+            activate(player, hand, type, data, now);
             return;
         }
 
-        // Case B: no effect now (after <= current, or not higher than the active bottle). Stores nothing.
+        // Every other case warns first; only a use of the same bottle, for the same reason, within the window
+        // confirms. Later, the window restarts with a new warning.
         long windowMs = cfg.confirmWindowSeconds() * 1000L;
         PendingConfirm confirm = pending.get(id);
-        if (confirm == null || !confirm.matches(data) || now - confirm.timestamp() >= windowMs) {
-            pending.put(id, new PendingConfirm(type.id(), m, data.durationSeconds(), now));
-            msg.send(player, type, "bottle.confirm", "type", type.id(), "type_name", type.displayName(),
-                    "multiplier", m, "effective", current, "after", after, "seconds", cfg.confirmWindowSeconds());
+        if (confirm == null || !confirm.matches(data, warning) || now - confirm.timestamp() >= windowMs) {
+            pending.put(id, new PendingConfirm(type.id(), m, data.durationSeconds(), warning, now));
+            PersonalBoost old = MultiplierCalculator.displayed(controller.registry().personal(id), type.id(), now);
+            String remaining = old == null ? "" : DurationFormat.clock(DurationFormat.remainingSeconds(old.expiresAt(), now));
+            msg.send(player, type, warning.key, "type", type.id(), "type_name", type.displayName(),
+                    "multiplier", m, "old", active, "remaining", remaining, "duration", msg.duration(data.durationSeconds()),
+                    "effective", current, "after", after, "seconds", cfg.confirmWindowSeconds());
             return;
         }
-        // second use inside the window: the player's informed choice, consume without effect;
-        // the active bottle of the type is kept unchanged
+        // second use inside the window: the player's informed choice
         pending.remove(id);
+        if (warning.replaces) {
+            activate(player, hand, type, data, now);
+            return;
+        }
+        // no effect: consumed, the active bottle of the type is kept unchanged
         consumeOne(player.getInventory(), hand);
         msg.send(player, type, "bottle.used-no-effect", "type", type.id(), "type_name", type.displayName(),
                 "multiplier", m);
+    }
+
+    /** Consumes the bottle, then replaces the active bottle of the type (if any). */
+    private void activate(Player player, ItemStack hand, BoostType type, BottleData data, long now) {
+        CoreConfig cfg = config.get();
+        Messages msg = messages.get();
+        int m = data.multiplier();
+        consumeOne(player.getInventory(), hand);
+        PersonalBoost replaced = controller.setPersonal(player, new PersonalBoost(type.id(), m,
+                now + data.durationSeconds() * 1000L, data.durationSeconds()), now);
+        if (replaced != null) {
+            msg.send(player, type, "bottle.replaced", "type", type.id(), "type_name", type.displayName(),
+                    "old", replaced.multiplier(), "multiplier", m,
+                    "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(replaced.expiresAt(), now)));
+        }
+        msg.send(player, type, "bottle.used", "type", type.id(), "type_name", type.displayName(),
+                "multiplier", m, "duration", msg.duration(data.durationSeconds()));
+        if (cfg.successSound() != null) {
+            player.playSound(Sound.sound(cfg.successSound(), Sound.Source.PLAYER, 1f, 1f), Sound.Emitter.self());
+        }
     }
 
     private static void consumeOne(PlayerInventory inventory, ItemStack hand) {

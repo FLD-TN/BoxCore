@@ -10,6 +10,8 @@ dependencies {
     compileOnly("me.clip:placeholderapi:2.11.6")
 
     testImplementation(paperApi)
+    // Paper provides the SQLite driver at runtime (never shaded); tests need their own copy
+    testImplementation("org.xerial:sqlite-jdbc:3.53.4.0")
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

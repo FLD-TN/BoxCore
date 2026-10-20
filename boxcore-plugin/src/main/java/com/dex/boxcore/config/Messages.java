@@ -6,6 +6,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.title.Title;
 import net.kyori.adventure.text.minimessage.tag.Tag;
 import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import org.bukkit.Bukkit;
@@ -28,7 +29,8 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 /**
- * Immutable snapshot of {@code messages.yml}: styled templates (small caps applied once at load),
+ * Immutable snapshot of {@code messages.yml}: templates (chat in the normal font; small caps, if enabled, only
+ * on bottle items and bossbar titles, applied when rendered),
  * palette tags, prefix, and the per-player anti-spam rule (same key at most once per 20 ticks).
  */
 public final class Messages {
@@ -38,6 +40,8 @@ public final class Messages {
     /** File format version key shared by config.yml and messages.yml, not a message. */
     public static final String VERSION_KEY = "config-version";
     private static final MiniMessage MM = MiniMessage.miniMessage();
+    private static final String GEM_PREFIX = "gem.";
+    private static final String GEM_PLACEHOLDER = "%gem%";
 
     /** Anti-spam state, shared between reloads, owned by the plugin, main thread only. */
     public static final class Throttle {
@@ -70,15 +74,17 @@ public final class Messages {
     private final Map<String, TagResolver> typed;
     private final DurationFormat.Units units;
     private final Throttle throttle;
+    private final boolean smallCaps;
 
     private Messages(Map<String, String> strings, Map<String, List<String>> lists, TagResolver palette,
-                     Map<String, TagResolver> typed, Throttle throttle) {
+                     Map<String, TagResolver> typed, Throttle throttle, boolean smallCaps) {
         this.strings = strings;
         this.lists = lists;
         this.prefix = strings.getOrDefault("prefix", "");
         this.palette = palette;
         this.typed = typed;
         this.throttle = throttle;
+        this.smallCaps = smallCaps;
         this.units = new DurationFormat.Units(
                 strings.getOrDefault("units.second", "giây"),
                 strings.getOrDefault("units.minute", "phút"),
@@ -114,8 +120,22 @@ public final class Messages {
                                  Throttle throttle) {
         Map<String, String> strings = new HashMap<>();
         Map<String, List<String>> lists = new HashMap<>();
+        String gem = gemName(config);
+        int missingGem = 0;
         for (String key : defaults.getKeys(true)) {
             if (defaults.isConfigurationSection(key) || key.equals(VERSION_KEY)) continue;
+            if (key.startsWith(GEM_PREFIX) && !yaml.contains(key)) {
+                // files written before 1.3.0 have no gem messages: one info line instead of one warning per key
+                missingGem++;
+                if (defaults.isList(key)) {
+                    List<String> styled = new ArrayList<>();
+                    for (String line : defaults.getStringList(key)) styled.add(style(line, config, gem));
+                    lists.put(key, List.copyOf(styled));
+                } else {
+                    strings.put(key, style(defaults.getString(key, ""), config, gem));
+                }
+                continue;
+            }
             if (defaults.isList(key)) {
                 List<String> value;
                 if (yaml.isList(key)) {
@@ -129,7 +149,7 @@ public final class Messages {
                     value = defaults.getStringList(key);
                 }
                 List<String> styled = new ArrayList<>(value.size());
-                for (String line : value) styled.add(style(line, config));
+                for (String line : value) styled.add(style(line, config, gem));
                 lists.put(key, List.copyOf(styled));
             } else {
                 String value;
@@ -144,21 +164,26 @@ public final class Messages {
                     }
                     value = defaults.getString(key, "");
                 }
-                strings.put(key, style(value, config));
+                strings.put(key, style(value, config, gem));
             }
+        }
+        if (missingGem > 0) {
+            logger.info("[" + FILE + "] " + missingGem + " gem message(s) missing, using the bundled defaults "
+                    + "(copy them from the bundled messages.yml to customise)");
         }
 
         List<TagResolver> base = new ArrayList<>();
         for (Map.Entry<String, TextColor> e : config.palette().entrySet()) {
             base.add(TagResolver.resolver(e.getKey(), Tag.styling(e.getValue())));
         }
+        base.add(TagResolver.resolver("gem", Tag.styling(config.gem().color())));
         TextColor textColor = config.palette().get("text");
         TagResolver palette = withType(base, textColor);
         Map<String, TagResolver> typed = new HashMap<>();
         for (BoostType type : config.typeList()) {
             typed.put(type.id(), withType(base, type.textColor() != null ? type.textColor() : textColor));
         }
-        return new Messages(Map.copyOf(strings), Map.copyOf(lists), palette, Map.copyOf(typed), throttle);
+        return new Messages(Map.copyOf(strings), Map.copyOf(lists), palette, Map.copyOf(typed), throttle, config.smallCaps());
     }
 
     private static TagResolver withType(List<TagResolver> base, TextColor typeColor) {
@@ -172,9 +197,18 @@ public final class Messages {
         return typed.getOrDefault(type.id(), palette);
     }
 
-    private static String style(String template, CoreConfig config) {
+    /**
+     * {@code %gem%} → the coloured gem display name. The name is resolved once here, so {@link #fill} never
+     * sees {@code %gem%}.
+     */
+    private static String style(String template, CoreConfig config, String gem) {
         if (template == null) return "";
-        return config.smallCaps() ? SmallCaps.convert(template) : template;
+        return template.contains(GEM_PLACEHOLDER) ? template.replace(GEM_PLACEHOLDER, gem) : template;
+    }
+
+    /** {@code <gem>name</gem>}: the configured gem name in the gem colour. */
+    private static String gemName(CoreConfig config) {
+        return "<gem>" + MM.escapeTags(config.gem().displayName()) + "</gem>";
     }
 
     // ------------------------------------------------------------------ templates
@@ -239,9 +273,18 @@ public final class Messages {
         return parse(type, fill(template, placeholders));
     }
 
-    /** Renders a template for an item name or lore line: italic explicitly disabled. */
+    /** Renders a template for an item name or lore line: small caps (if enabled), italic explicitly disabled. */
     public Component renderItem(BoostType type, String template, Object... placeholders) {
-        return render(type, template, placeholders).decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
+        return parseStyled(type, fill(template, placeholders))
+                .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
+    }
+
+    /**
+     * Parses a filled template with small caps (if enabled): bottle items and bossbar titles only, chat stays
+     * in the normal font. Filled values are converted too; tags are never converted.
+     */
+    public Component parseStyled(BoostType type, String filled) {
+        return parse(type, smallCaps ? SmallCaps.convert(filled) : filled);
     }
 
     // ------------------------------------------------------------------ sending
@@ -257,6 +300,27 @@ public final class Messages {
         if (template.isEmpty() || to == null) return;
         if (to instanceof Player player && !throttle.allow(player.getUniqueId(), key)) return;
         to.sendMessage(parse(type, prefix + fill(template, placeholders)));
+    }
+
+    /**
+     * Sends a keyed chat message with prefix and without throttling: for notifications that must never be
+     * dropped (gems received, a transfer received). Empty messages are skipped.
+     */
+    public void notify(CommandSender to, String key, Object... placeholders) {
+        String template = raw(key);
+        if (template.isEmpty() || to == null) return;
+        to.sendMessage(parse(prefix + fill(template, placeholders)));
+    }
+
+    /**
+     * Shows a keyed title and subtitle (no prefix, no throttling) with {@code <type>} coloured for {@code type}.
+     * Skipped when both templates are empty.
+     */
+    public void title(Player to, BoostType type, String titleKey, String subtitleKey, Object... placeholders) {
+        String title = raw(titleKey);
+        String subtitle = raw(subtitleKey);
+        if ((title.isEmpty() && subtitle.isEmpty()) || to == null) return;
+        to.showTitle(Title.title(render(type, title, placeholders), render(type, subtitle, placeholders)));
     }
 
     /** Sends a keyed message to every online player and the console. */
