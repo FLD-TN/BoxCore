@@ -1,5 +1,6 @@
 package com.dex.boxcore.config;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.gem.GemConfig;
 import com.dex.boxcore.util.DurationFormat;
 import net.kyori.adventure.bossbar.BossBar;
@@ -58,13 +59,14 @@ public final class CoreConfig {
     private final ZoneId timezone;
     private final boolean smallCaps;
     private final Map<String, TextColor> palette;
+    private final char decimalSeparator;
     private final GemConfig gem;
 
     private CoreConfig(Map<String, BoostType> types, Material bottleMaterial, UseClick useClick,
                        int useCooldownTicks, int confirmWindowSeconds, Key successSound, int descriptionWidth,
                        int permissionRefreshSeconds,
                        int saveDebounceSeconds, ZoneId timezone, boolean smallCaps, Map<String, TextColor> palette,
-                       GemConfig gem) {
+                       char decimalSeparator, GemConfig gem) {
         this.types = Collections.unmodifiableMap(types);
         this.typeList = List.copyOf(types.values());
         this.bottleMaterial = bottleMaterial;
@@ -78,6 +80,7 @@ public final class CoreConfig {
         this.timezone = timezone;
         this.smallCaps = smallCaps;
         this.palette = Collections.unmodifiableMap(palette);
+        this.decimalSeparator = decimalSeparator;
         this.gem = gem;
     }
 
@@ -99,7 +102,7 @@ public final class CoreConfig {
     }
 
     /** @param isUsableItem material check (needs a running server; replaceable in unit tests) */
-    static CoreConfig parse(YamlConfiguration yaml, Logger logger, java.util.function.Predicate<Material> isUsableItem) {
+    public static CoreConfig parse(YamlConfiguration yaml, Logger logger, java.util.function.Predicate<Material> isUsableItem) {
         Warn warn = new Warn(logger);
 
         // style first: type names and descriptions are styled at load
@@ -178,11 +181,22 @@ public final class CoreConfig {
             }
         }
 
+        char separator = '.';
+        Object rawSeparator = yaml.get("multiplier-decimal-separator");
+        if (rawSeparator != null) {
+            String text = String.valueOf(rawSeparator);
+            if (text.equals(".") || text.equals(",")) {
+                separator = text.charAt(0);
+            } else {
+                warn.invalid("multiplier-decimal-separator", rawSeparator, "'.'");
+            }
+        }
+
         GemConfig gem = GemConfig.parse(yaml, logger);
 
         return new CoreConfig(types, material, useClick, cooldown, confirmWindow, sound, descriptionWidth, permRefresh,
                 debounce,
-                zone, smallCaps, palette, gem);
+                zone, smallCaps, palette, separator, gem);
     }
 
     private static BoostType parseType(ConfigurationSection section, String id, int index,
@@ -197,10 +211,21 @@ public final class CoreConfig {
             logger.warning("[" + FILE + "] Skipping boost type '" + id + "': not a section");
             return null;
         }
+        boolean decimal = false;
+        Object rawDecimal = s.get("decimal");
+        if (rawDecimal instanceof Boolean b) {
+            decimal = b;
+        } else if (rawDecimal != null) {
+            warn.invalid(path + ".decimal", rawDecimal, false);
+        }
         Object rawMax = s.get("max-multiplier");
-        if (!(rawMax instanceof Integer max) || max < 2) {
-            logger.warning("[" + FILE + "] Skipping boost type '" + id + "': " + path
-                    + ".max-multiplier must be an integer >= 2 (value: " + rawMax + ")");
+        int max = rawMax instanceof Number ? Multipliers.parse(String.valueOf(rawMax)) : -1;
+        if (max < BoostType.minTenths(decimal) || max > BoostType.LIMIT_TENTHS
+                || (!decimal && max % Multipliers.ONE != 0)) {
+            logger.warning("[" + FILE + "] Skipping boost type '" + id + "': " + path + ".max-multiplier must be "
+                    + (decimal ? "a number from 1.1 to 10000 with at most one decimal"
+                               : "an integer from 2 to 10000 (or set decimal: true)")
+                    + " (value: " + rawMax + ")");
             return null;
         }
         String rawDuration = s.getString("max-duration");
@@ -231,7 +256,7 @@ public final class CoreConfig {
                 warn.invalid(path + ".bossbar-color", rawColor, "WHITE");
             }
         }
-        return new BoostType(id, index, displayName, description, max, maxDuration, textColor, color);
+        return new BoostType(id, index, displayName, description, max, decimal, maxDuration, textColor, color);
     }
 
     private static boolean bool(YamlConfiguration yaml, String key, boolean def, Warn warn) {
@@ -275,4 +300,8 @@ public final class CoreConfig {
     public ZoneId timezone() { return timezone; }
     public boolean smallCaps() { return smallCaps; }
     public Map<String, TextColor> palette() { return palette; }
+    /** Decimal separator of displayed multipliers ({@code multiplier-decimal-separator}), {@code '.'} or {@code ','}. */
+    public char decimalSeparator() { return decimalSeparator; }
+    /** A multiplier in tenths formatted for display: {@code 15} → {@code 1.5}. */
+    public String formatMultiplier(int tenths) { return Multipliers.format(tenths, decimalSeparator); }
 }

@@ -3,8 +3,10 @@
 # Do not change. Files without it (BoxCore 1.0.0) are backed up and replaced by the new defaults
 config-version: 2
 #
-# Boost multipliers are integers. Per player and type, with absent sources counted as 0:
-#   R = rank permission  boxcore.boost.<type>.<n>, n >= 2 (e.g. boxcore.boost.mining.5, give it with LuckPerms)
+# Boost multipliers are whole numbers; a type with decimal: true also accepts one decimal, e.g. 1.5.
+# Per player and type, with absent sources counted as 0:
+#   R = rank permission  boxcore.boost.<type>.<n>, above 1 (e.g. boxcore.boost.mining.5, give it with LuckPerms).
+#       Decimal types: boxcore.boost.<type>.<whole>_<digit>, e.g. boxcore.boost.quest.1_5 = x1.5 (a dot cannot be used)
 #   B = the active personal bottle (at most one per type; a better bottle replaces the active one)
 #   G = the global boost  /boxcore global start <type> <multiplier> <duration>
 #   effective = min( max(R + B, G, 1), max-multiplier )
@@ -17,8 +19,12 @@ config-version: 2
 # Boost types. A type only has an effect if some plugin asks BoxCore for it
 # (mining: CataMines, quest: BoxQuest). Giving a bottle of an undeclared type is refused.
 #   id              ^[a-z0-9_]{1,32}$
-#   max-multiplier  integer >= 2, largest multiplier for bottles, global boosts and rank permissions,
-#                   and the cap of the final effective value (rank + bottle is capped here)
+#   decimal         true: multipliers may have one decimal (x1.5, x2.5), smallest x1.1;
+#                   false (default when missing): whole numbers only, smallest x2.
+#                   mining stays false: CataMines only applies whole multipliers
+#   max-multiplier  largest multiplier for bottles, global boosts and rank permissions, and the cap of the
+#                   final effective value (rank + bottle is capped here). Whole number from 2 to 10000,
+#                   or with decimal: true a number from 1.1 to 10000 with at most one decimal
 #   max-duration    e.g. 30m, 12h, 1d, 1h30m
 #   color           text colour of the type name in messages, bottle names and bossbar titles ('#RRGGBB')
 #   bossbar-color   colour of the bar itself, only PINK, BLUE, RED, GREEN, YELLOW, PURPLE, WHITE exist
@@ -28,6 +34,7 @@ types:
   mining:
     display-name: 'Mining'
     description: 'Tăng x%multiplier% vật phẩm nhận được khi đào các khối'
+    decimal: false
     max-multiplier: 100
     max-duration: 24h
     color: '#FFAA00'
@@ -35,6 +42,7 @@ types:
   quest:
     display-name: 'Quest'
     description: 'Tăng x%multiplier% phần thưởng nhận được khi hoàn thành nhiệm vụ (/quest)'
+    decimal: true
     max-multiplier: 100
     max-duration: 24h
     color: '#55FFFF'
@@ -59,8 +67,12 @@ bottle:
   # Sound played on a successful activation (a Minecraft sound key), '' disables it
   success-sound: 'entity.player.levelup'
 
+# Decimal separator of displayed multipliers (x1.5 or x1,5), only '.' or ','.
+# %boxcore_multiple_<type>_raw% always uses '.'
+multiplier-decimal-separator: '.'
+
 # How often rank permissions are re-read for online players, in seconds
-permission-refresh-seconds: 30
+permission-refresh-seconds: 10
 
 # Timezone of displayed clock times (/boxcore check). Never the host's default timezone
 timezone: 'Asia/Ho_Chi_Minh'

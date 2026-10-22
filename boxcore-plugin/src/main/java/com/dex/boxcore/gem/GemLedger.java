@@ -320,7 +320,11 @@ public final class GemLedger {
         try {
             db.submit(c -> {
                 GemDatabase.LoadResult r = GemDatabase.load(c, player, name, starting, now);
-                pending.put(player, new Account(r.balance(), r.seenTx(), r.name(), clock.getAsLong()));
+                // a load that finishes after the timeout must not become a stale pending balance: the join
+                // already loaded (or is loading) the player through load()
+                if (!online.containsKey(player)) {
+                    pending.put(player, new Account(r.balance(), r.seenTx(), r.name(), clock.getAsLong()));
+                }
                 return r;
             }).get(PRELOGIN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException ex) {
@@ -342,9 +346,15 @@ public final class GemLedger {
         if (!online.containsKey(player)) load(player, name);
     }
 
-    /** Main thread, PlayerQuitEvent. Nothing to flush: every change is already queued. */
+    /**
+     * Main thread, PlayerQuitEvent. The balance stays loaded until the next tick, so other plugins' quit handlers
+     * (which may run after BoxCore's) can still change it; it is then dropped unless the player is online again.
+     * Nothing to flush: every change is already queued.
+     */
     public void quit(UUID player) {
-        online.remove(player);
+        main.execute(() -> {
+            if (!isOnline.test(player)) online.remove(player);
+        });
     }
 
     /** Main thread: loads online players (plugin enable with players online). */
@@ -366,6 +376,8 @@ public final class GemLedger {
         long now = clock.getAsLong();
         db.submit(c -> GemDatabase.load(c, player, name, starting, now))
                 .whenComplete((r, error) -> main.execute(() -> {
+                    // a pre-login load that timed out ran before this one (single DB thread): drop it, it is older
+                    pending.remove(player);
                     if (error != null) {
                         logger.log(Level.SEVERE, "Could not load the gems of " + name + " (" + player + ")", error);
                         return;

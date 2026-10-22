@@ -1,5 +1,6 @@
 package com.dex.boxcore.item;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.config.BoostType;
 import com.dex.boxcore.config.CoreConfig;
 import com.dex.boxcore.config.Messages;
@@ -23,8 +24,12 @@ public final class BoostItemFactory {
         this.keys = keys;
     }
 
-    /** Builds one bottle stack of {@code amount} items (clamped to the material's max stack size). */
-    public ItemStack create(BoostType type, int multiplier, long durationSeconds, int amount,
+    /**
+     * Builds one bottle stack of {@code amount} items (clamped to the material's max stack size).
+     *
+     * @param tenths the multiplier in tenths (Update 04 D1)
+     */
+    public ItemStack create(BoostType type, int tenths, long durationSeconds, int amount,
                             CoreConfig config, Messages messages) {
         ItemStack item = new ItemStack(config.bottleMaterial());
         item.setAmount(Math.max(1, Math.min(amount, item.getMaxStackSize())));
@@ -32,9 +37,14 @@ public final class BoostItemFactory {
 
         PersistentDataContainer pdc = meta.getPersistentDataContainer();
         pdc.set(keys.type(), PersistentDataType.STRING, type.id());
-        pdc.set(keys.multiplier(), PersistentDataType.INTEGER, multiplier);
+        if (tenths % Multipliers.ONE == 0) {
+            pdc.set(keys.multiplier(), PersistentDataType.INTEGER, tenths / Multipliers.ONE); // stacks with old bottles
+        } else {
+            pdc.set(keys.multiplierTenths(), PersistentDataType.INTEGER, tenths);
+        }
         pdc.set(keys.duration(), PersistentDataType.LONG, durationSeconds);
 
+        String multiplier = messages.multiplier(tenths);
         String description = type.description(multiplier);
         Object[] placeholders = {
                 "type", type.id(),

@@ -16,6 +16,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
@@ -31,9 +32,12 @@ public final class BoostController implements Listener {
     private final BossBarService bars;
     private final Messages.Throttle throttle;
     private final ErrorReporter errors;
+    private final Executor nextTick;
 
+    /** @param nextTick runs a task on the main thread at the next tick (drops it once the plugin is disabled) */
     public BoostController(Supplier<CoreConfig> config, Supplier<Messages> messages, Messages.Throttle throttle,
-                           BoostRegistry registry, EffectiveCache cache, BossBarService bars, ErrorReporter errors) {
+                           BoostRegistry registry, EffectiveCache cache, BossBarService bars, ErrorReporter errors,
+                           Executor nextTick) {
         this.config = config;
         this.messages = messages;
         this.registry = registry;
@@ -41,6 +45,7 @@ public final class BoostController implements Listener {
         this.bars = bars;
         this.throttle = throttle;
         this.errors = errors;
+        this.nextTick = nextTick;
     }
 
     public BoostRegistry registry() {
@@ -82,8 +87,8 @@ public final class BoostController implements Listener {
     // ------------------------------------------------------------------ global
 
     /** Starts or replaces the global boost of a type. @return the replaced boost, or {@code null} */
-    public GlobalBoost startGlobal(BoostType type, int multiplier, long durationSeconds, long now) {
-        GlobalBoost old = registry.putGlobal(new GlobalBoost(type.id(), multiplier, now, now + durationSeconds * 1000L));
+    public GlobalBoost startGlobal(BoostType type, int tenths, long durationSeconds, long now) {
+        GlobalBoost old = registry.putGlobal(new GlobalBoost(type.id(), tenths, now, now + durationSeconds * 1000L));
         bars.syncGlobals(registry, now);
         refreshAll(now);
         return old != null && !old.isExpired(now) ? old : null;
@@ -131,10 +136,10 @@ public final class BoostController implements Listener {
             for (PersonalBoost b : e.getValue()) {
                 BoostType type = cfg.type(b.type());
                 if (type == null) continue;
-                msg.send(player, type, "bottle.expired", "type", type.id(), "type_name", type.displayName(),
-                        "multiplier", b.multiplier());
+                msg.notify(player, type, "bottle.expired", "type", type.id(), "type_name", type.displayName(),
+                        "multiplier", msg.multiplier(b.tenths()));
                 msg.title(player, type, "bottle.expired-title", "bottle.expired-subtitle", "type", type.id(),
-                        "type_name", type.displayName(), "multiplier", b.multiplier());
+                        "type_name", type.displayName(), "multiplier", msg.multiplier(b.tenths()));
             }
             if (expiredGlobals.isEmpty()) refresh(player, now);
         }
@@ -171,9 +176,17 @@ public final class BoostController implements Listener {
         refresh(player, System.currentTimeMillis());
     }
 
+    /**
+     * Bars are hidden at once. The multipliers stay in the cache until the next tick, so other plugins' quit
+     * handlers (which may run after BoxCore's) still read the player's real multiplier; they are then dropped
+     * unless the player is online again.
+     */
     public void quit(Player player) {
-        cache.remove(player.getUniqueId());
+        UUID id = player.getUniqueId();
         bars.quit(player);
-        throttle.forget(player.getUniqueId());
+        throttle.forget(id);
+        nextTick.execute(() -> {
+            if (Bukkit.getPlayer(id) == null) cache.remove(id);
+        });
     }
 }

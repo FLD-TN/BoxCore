@@ -69,7 +69,7 @@ bottle-item:
 
 give:
   done: '<success>✔ Đã tặng <text>%amount% <type>Boost %type_name% x%multiplier% <muted>(%duration%) <success>cho <text>%player%'
-  received: '<success>✔ Bạn nhận được <text>%amount% <type>Boost %type_name% x%multiplier%'
+  received: '<success>Bạn nhận được <text>%amount% <type>Boost %type_name% x%multiplier%'
 
 global:
   started: '<accent>Boost toàn server <type>%type_name% x%multiplier% <accent>đã bắt đầu trong <text>%duration%'
@@ -82,6 +82,8 @@ global:
 error:
   unknown-type: '<error>✘ Loại boost không tồn tại: <text>%type%'
   multiplier: '<error>✘ Bội số phải là số nguyên từ 2 đến %max%'
+  # types with decimal: true (quest)
+  multiplier-decimal: '<error>✘ Bội số phải từ 1.1 đến %max% (tối đa 1 chữ số thập phân, ví dụ 1.5)'
   duration: '<error>✘ Thời gian không hợp lệ, ví dụ: 30s, 10m, 1h30m (tối đa %max%)'
   player-offline: '<error>✘ Người chơi <text>%player% <error>không trực tuyến'
   amount: '<error>✘ Số lượng phải là số nguyên từ 1 đến 64'
@@ -123,7 +125,7 @@ check:
 gem:
   balance: '<muted>Số dư: <text>%amount% %gem%'
   # to the player on /boxcore gem give|take|set (not with -s)
-  received: '<success>✔ Bạn nhận được <aqua>%amount% %gem%'
+  received: '<success>Bạn nhận được <aqua>%amount% %gem%'
   taken: '<muted>Đã trừ %amount% %gem% khỏi tài khoản của bạn'
   set: '<muted>Số dư %gem% của bạn được đặt thành <text>%amount%'
   admin:
@@ -138,7 +140,7 @@ gem:
     check-empty: '<muted>Chưa có giao dịch nào'
   pay:
     sent: '<success>✔ Đã chuyển <text>%amount% %gem% <success>cho <text>%player%'
-    received: '<success>✔ Bạn nhận được <aqua>%amount% %gem% <success>từ <text>%player%'
+    received: '<success>Bạn nhận được <aqua>%amount% %gem% <success>từ <text>%player%'
     insufficient: '<error>✘ Bạn không đủ %gem%, số dư hiện tại: <text>%balance%'
     self: '<error>✘ Không thể tự chuyển cho chính mình'
     min: '<error>✘ Số lượng tối thiểu là <text>%min%'

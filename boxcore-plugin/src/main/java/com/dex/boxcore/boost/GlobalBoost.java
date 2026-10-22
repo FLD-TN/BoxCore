@@ -4,11 +4,11 @@ package com.dex.boxcore.boost;
  * The server-wide boost of a type (at most one per type). Stored as absolute instants (real time).
  *
  * @param type       boost type id
- * @param multiplier multiplier, at least 2
+ * @param tenths     multiplier in tenths (Update 04 D1), at least the type's minimum
  * @param startedAt  start instant, epoch milliseconds (UTC)
  * @param expiresAt  expiry instant, epoch milliseconds (UTC)
  */
-public record GlobalBoost(String type, int multiplier, long startedAt, long expiresAt) {
+public record GlobalBoost(String type, int tenths, long startedAt, long expiresAt) {
 
     public boolean isExpired(long now) {
         return expiresAt <= now;

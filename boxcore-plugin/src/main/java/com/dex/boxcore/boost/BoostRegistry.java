@@ -71,7 +71,7 @@ public final class BoostRegistry {
             PersonalBoost old = it.next();
             if (!old.type().equals(boost.type())) continue;
             it.remove();
-            if (replaced == null || old.multiplier() > replaced.multiplier()) replaced = old;
+            if (replaced == null || old.tenths() > replaced.tenths()) replaced = old;
         }
         list.add(boost);
         nextPersonalExpiry = Math.min(nextPersonalExpiry, boost.expiresAt());
@@ -145,8 +145,8 @@ public final class BoostRegistry {
             Map<String, PersonalBoost> perType = new LinkedHashMap<>();
             for (PersonalBoost b : e.getValue()) {
                 PersonalBoost kept = perType.get(b.type());
-                if (kept == null || b.multiplier() > kept.multiplier()
-                        || (b.multiplier() == kept.multiplier() && b.expiresAt() > kept.expiresAt())) {
+                if (kept == null || b.tenths() > kept.tenths()
+                        || (b.tenths() == kept.tenths() && b.expiresAt() > kept.expiresAt())) {
                     perType.put(b.type(), b);
                 }
             }

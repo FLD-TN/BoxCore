@@ -1,5 +1,6 @@
 package com.dex.boxcore.item;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.config.BoostType;
 import com.dex.boxcore.config.CoreConfig;
 import io.papermc.paper.persistence.PersistentDataContainerView;
@@ -30,10 +31,16 @@ public final class BoostItemReader {
         try {
             PersistentDataContainerView pdc = item.getPersistentDataContainer();
             String type = pdc.get(keys.type(), PersistentDataType.STRING);
-            Integer multiplier = pdc.get(keys.multiplier(), PersistentDataType.INTEGER);
+            Integer tenths = pdc.get(keys.multiplierTenths(), PersistentDataType.INTEGER);
+            if (tenths == null) {
+                Integer whole = pdc.get(keys.multiplier(), PersistentDataType.INTEGER);
+                if (whole == null) return null;
+                // out of range values stay invalid without overflowing
+                tenths = whole > BoostType.LIMIT_TENTHS / Multipliers.ONE || whole < 0 ? -1 : whole * Multipliers.ONE;
+            }
             Long duration = pdc.get(keys.duration(), PersistentDataType.LONG);
-            if (type == null || multiplier == null || duration == null) return null;
-            return new BottleData(type, multiplier, duration);
+            if (type == null || duration == null) return null;
+            return new BottleData(type, tenths, duration);
         } catch (IllegalArgumentException wrongType) {
             return null;
         }
@@ -41,7 +48,7 @@ public final class BoostItemReader {
 
     /**
      * Re-validates bottle data against the CURRENT config: type declared, multiplier in
-     * {@code [2, max-multiplier]}, duration in {@code (0, max-duration]}.
+     * {@code [min, max-multiplier]} and whole unless the type is decimal, duration in {@code (0, max-duration]}.
      *
      * @return the type if valid, otherwise {@code null}
      */
@@ -49,7 +56,7 @@ public final class BoostItemReader {
         if (data == null) return null;
         BoostType type = config.type(data.type());
         if (type == null) return null;
-        if (!type.isValidMultiplier(data.multiplier())) return null;
+        if (!type.isValidMultiplier(data.tenths())) return null;
         if (!type.isValidDuration(data.durationSeconds())) return null;
         return type;
     }

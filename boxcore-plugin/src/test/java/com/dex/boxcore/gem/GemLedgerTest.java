@@ -127,9 +127,39 @@ class GemLedgerTest {
         assertEquals(-1, ledger.balance(P1));
         assertEquals(GemResult.NOT_LOADED, ledger.deposit(P1, 5, "test"));
         login(P1, "Steve");
+        online.remove(P1);
         ledger.quit(P1);
+        // still loaded during the quit tick: quit handlers of other plugins can still pay out
+        assertEquals(GemResult.SUCCESS, ledger.deposit(P1, 3, "afk:quit"));
+        settle(); // next tick
         assertFalse(ledger.isLoaded(P1));
         assertEquals(GemResult.NOT_LOADED, ledger.withdraw(P1, 1, "test"));
+        assertEquals(3, stored(P1));
+    }
+
+    @Test
+    void quitKeepsTheBalanceIfThePlayerIsBackBeforeTheNextTick() throws Exception {
+        login(P1, "Steve");
+        ledger.quit(P1); // still in the online set: rejoined at once
+        settle();
+        assertTrue(ledger.isLoaded(P1));
+    }
+
+    @Test
+    void timedOutPreLoginLeavesNoStalePendingBalance() throws Exception {
+        login(P1, "Steve");
+        assertEquals(GemResult.SUCCESS, ledger.deposit(P1, 10, "test"));
+        online.remove(P1);
+        ledger.quit(P1);
+        settle();
+        // a pre-login load whose result arrives after the join: the join falls back to load()
+        online.add(P1);
+        ledger.join(P1, "Steve");
+        ledger.preLogin(P1, "Steve"); // result stored late, as after a timeout
+        settle();
+        assertTrue(ledger.isLoaded(P1));
+        assertFalse(ledger.isPending(P1), "the late pre-login result must not stay pending");
+        assertEquals(10, ledger.balance(P1));
     }
 
     @Test

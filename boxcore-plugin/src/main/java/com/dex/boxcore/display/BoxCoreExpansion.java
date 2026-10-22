@@ -1,5 +1,6 @@
 package com.dex.boxcore.display;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.config.Messages;
 import com.dex.boxcore.gem.GemFormat;
@@ -12,13 +13,15 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * PlaceholderAPI expansion {@code boxcore} (§7.3, Update 03 §6): {@code %boxcore_multiple_<type>%} and the gem
+ * PlaceholderAPI expansion {@code boxcore} (§7.3, Update 03 §6, Update 04 D7): {@code %boxcore_multiple_<type>%},
+ * {@code %boxcore_multiple_<type>_raw%} and the gem
  * placeholders. {@link #onRequest} may run on async threads, so it only reads the effective-multiplier cache,
  * the in-memory gem balances and the leaderboard snapshot; it never touches the database.
  */
 public final class BoxCoreExpansion extends PlaceholderExpansion {
 
     private static final String MULTIPLE = "multiple_";
+    private static final String RAW = "_raw";
     private static final String GEM = "gem";
     private static final String GEM_TOP = "gem_top_";
 
@@ -63,7 +66,12 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
         if (params.startsWith(MULTIPLE)) {
             try {
                 if (player == null) return "1";
-                return Integer.toString(cache.get(player.getUniqueId(), params.substring(MULTIPLE.length())));
+                // Update 04 D7: <type>_raw always uses '.', <type> the configured separator
+                String type = params.substring(MULTIPLE.length());
+                boolean raw = type.endsWith(RAW);
+                if (raw) type = type.substring(0, type.length() - RAW.length());
+                int tenths = cache.get(player.getUniqueId(), type);
+                return raw ? Multipliers.format(tenths) : messages.get().multiplier(tenths);
             } catch (Throwable t) {
                 return "1";
             }

@@ -1,8 +1,10 @@
 package com.dex.boxcore.storage;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.boost.BoostRegistry;
 import com.dex.boxcore.boost.GlobalBoost;
 import com.dex.boxcore.boost.PersonalBoost;
+import com.dex.boxcore.config.BoostType;
 import com.dex.boxcore.util.ErrorReporter;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
@@ -13,6 +15,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +45,8 @@ public final class BoostStorage {
 
     public static final String GLOBAL_FILE = "global-boosts.yml";
     public static final String PLAYER_FILE = "player-boosts.yml";
+    /** Smallest stored multiplier: x1.1. The type's own limits are applied by the effective-multiplier cache. */
+    private static final int MIN_TENTHS = BoostType.MIN_DECIMAL_TENTHS;
 
     private final Plugin plugin;
     private final Logger logger;
@@ -163,9 +168,9 @@ public final class BoostStorage {
                 || !(s.get("expires-at") instanceof Number end)) {
             return null;
         }
-        int multiplier = m.intValue();
-        if (multiplier < 2 || end.longValue() <= start.longValue()) return null;
-        return new GlobalBoost(type, multiplier, start.longValue(), end.longValue());
+        int tenths = tenths(m);
+        if (tenths < MIN_TENTHS || end.longValue() <= start.longValue()) return null;
+        return new GlobalBoost(type, tenths, start.longValue(), end.longValue());
     }
 
     private static PersonalBoost parsePersonal(Map<?, ?> map) {
@@ -173,8 +178,29 @@ public final class BoostStorage {
                 || !(map.get("expires-at") instanceof Number end) || !(map.get("total-seconds") instanceof Number total)) {
             return null;
         }
-        if (m.intValue() < 2 || total.longValue() <= 0) return null;
-        return new PersonalBoost(type, m.intValue(), end.longValue(), total.longValue());
+        int tenths = tenths(m);
+        if (tenths < MIN_TENTHS || total.longValue() <= 0) return null;
+        return new PersonalBoost(type, tenths, end.longValue(), total.longValue());
+    }
+
+    /**
+     * {@code multiplier} in tenths (Update 04 D6): a YAML integer is a whole multiplier ({@code 3} → 30), a float may
+     * have one decimal ({@code 1.5} → 15). @return -1 for anything else ({@code 1.25}, NaN, too large)
+     */
+    static int tenths(Number m) {
+        if (m instanceof Integer || m instanceof Long || m instanceof Short || m instanceof Byte) {
+            long whole = m.longValue();
+            return whole < 0 || whole > BoostType.LIMIT_TENTHS / Multipliers.ONE ? -1 : (int) whole * Multipliers.ONE;
+        }
+        double d = m.doubleValue();
+        if (!Double.isFinite(d) || d < 0 || d > BoostType.LIMIT_TENTHS / (double) Multipliers.ONE) return -1;
+        BigDecimal tenths = BigDecimal.valueOf(d).movePointRight(1).stripTrailingZeros();
+        return tenths.scale() > 0 ? -1 : tenths.intValueExact();
+    }
+
+    /** Whole multipliers are written as YAML integers (unchanged since 1.0.0), decimal ones as floats. */
+    private static Object yamlValue(int tenths) {
+        return tenths % Multipliers.ONE == 0 ? (Object) (tenths / Multipliers.ONE) : (Object) (tenths / 10.0);
     }
 
     // ------------------------------------------------------------------ save
@@ -234,7 +260,7 @@ public final class BoostStorage {
     private Snapshot snapshot() {
         YamlConfiguration global = new YamlConfiguration();
         for (GlobalBoost b : registry.globals().values()) {
-            global.set(b.type() + ".multiplier", b.multiplier());
+            global.set(b.type() + ".multiplier", yamlValue(b.tenths()));
             global.set(b.type() + ".started-at", b.startedAt());
             global.set(b.type() + ".expires-at", b.expiresAt());
         }
@@ -245,7 +271,7 @@ public final class BoostStorage {
             for (PersonalBoost b : e.getValue()) {
                 Map<String, Object> map = new LinkedHashMap<>();
                 map.put("type", b.type());
-                map.put("multiplier", b.multiplier());
+                map.put("multiplier", yamlValue(b.tenths()));
                 map.put("expires-at", b.expiresAt());
                 map.put("total-seconds", b.totalSeconds());
                 list.add(map);

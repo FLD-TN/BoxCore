@@ -58,7 +58,10 @@ class ConfigLoadingTest {
         assertEquals(List.of("mining", "quest"), new ArrayList<>(config.types().keySet()));
         BoostType mining = config.type("mining");
         assertEquals(0, mining.index());
-        assertEquals(100, mining.maxMultiplier());
+        assertEquals(1000, mining.maxTenths());
+        assertTrue(!mining.decimal(), "mining stays whole numbers");
+        assertTrue(config.type("quest").decimal(), "quest allows decimals");
+        assertEquals('.', config.decimalSeparator());
         assertEquals(86400, mining.maxDurationSeconds());
         assertEquals(BossBar.Color.YELLOW, mining.color());
         assertEquals(TextColor.fromHexString("#FFAA00"), mining.textColor());
@@ -123,7 +126,7 @@ class ConfigLoadingTest {
 
         BoostType mining = config.type("mining");
         Object[] ph = {"type", "mining", "type_name", mining.displayName(), "multiplier", 10,
-                "duration", messages.duration(1200), "description", mining.description(10),
+                "duration", messages.duration(1200), "description", mining.description("10"),
                 "click", messages.click(config.useClick())};
         Component name = messages.renderItem(mining, messages.raw("bottle-item.name"), ph);
         assertEquals("Boost Mining [x10]", PLAIN.serialize(name));
@@ -350,5 +353,92 @@ class ConfigLoadingTest {
         Style merged = c.style().merge(parent, Style.Merge.Strategy.IF_ABSENT_ON_TARGET);
         out.add(c.children(List.of()).style(merged));
         for (Component child : c.children()) flatten(child, merged, out);
+    }
+
+    // ------------------------------------------------------------------ Update 04: decimal multipliers
+
+    @Test
+    void decimalFlagAndMaxMultiplier() throws Exception {
+        YamlConfiguration yaml = bundled("config.yml");
+        yaml.set("types.quest.max-multiplier", 12.5);
+        yaml.set("types.dec_missing.max-multiplier", 5);       // no decimal key: whole type
+        yaml.set("types.dec_missing.max-duration", "1h");
+        yaml.set("types.dec_bad.decimal", "yes-please");        // not a boolean: false + warning
+        yaml.set("types.dec_bad.max-multiplier", 5);
+        yaml.set("types.dec_bad.max-duration", "1h");
+        yaml.set("types.whole_half.max-multiplier", 50.5);      // decimal max on a whole type: skipped
+        yaml.set("types.whole_half.max-duration", "1h");
+        yaml.set("types.dec_low.decimal", true);
+        yaml.set("types.dec_low.max-multiplier", 1.1);          // smallest decimal max
+        yaml.set("types.dec_low.max-duration", "1h");
+        yaml.set("types.dec_one.decimal", true);
+        yaml.set("types.dec_one.max-multiplier", 1);            // below x1.1: skipped
+        yaml.set("types.dec_one.max-duration", "1h");
+        yaml.set("types.too_big.max-multiplier", 10001);        // above x10000: skipped
+        yaml.set("types.too_big.max-duration", "1h");
+        yaml.set("types.two_decimals.decimal", true);
+        yaml.set("types.two_decimals.max-multiplier", 2.25);    // two decimals: skipped
+        yaml.set("types.two_decimals.max-duration", "1h");
+        Capture capture = new Capture();
+        CoreConfig config = CoreConfig.parse(yaml, logger(capture), m -> true);
+
+        assertEquals(125, config.type("quest").maxTenths());
+        assertTrue(!config.type("dec_missing").decimal());
+        assertEquals(50, config.type("dec_missing").maxTenths());
+        assertTrue(!config.type("dec_bad").decimal());
+        assertEquals(11, config.type("dec_low").maxTenths());
+        for (String skipped : List.of("whole_half", "dec_one", "too_big", "two_decimals")) {
+            assertNull(config.type(skipped), skipped);
+        }
+        String log = String.join("\n", capture.messages);
+        for (String key : List.of("types.dec_bad.decimal", "whole_half", "dec_one", "too_big", "two_decimals")) {
+            assertTrue(log.contains(key), "warning should name " + key + ":\n" + log);
+        }
+        assertTrue(!log.contains("dec_missing"), log);
+    }
+
+    @Test
+    void multiplierValidityFollowsDecimalFlag() throws Exception {
+        CoreConfig config = CoreConfig.parse(bundled("config.yml"), Logger.getAnonymousLogger(), m -> true);
+        BoostType mining = config.type("mining");
+        BoostType quest = config.type("quest");
+        assertTrue(quest.isValidMultiplier(11));
+        assertTrue(quest.isValidMultiplier(15));
+        assertTrue(quest.isValidMultiplier(1000));
+        assertTrue(!quest.isValidMultiplier(10));
+        assertTrue(!quest.isValidMultiplier(1001));
+        assertTrue(mining.isValidMultiplier(20));
+        assertTrue(!mining.isValidMultiplier(15));
+        assertTrue(!mining.isValidMultiplier(25));
+        assertTrue(!mining.isValidMultiplier(10));
+    }
+
+    @Test
+    void decimalSeparatorIsConfigurable() throws Exception {
+        YamlConfiguration yaml = bundled("config.yml");
+        yaml.set("multiplier-decimal-separator", ",");
+        CoreConfig config = CoreConfig.parse(yaml, Logger.getAnonymousLogger(), m -> true);
+        assertEquals("1,5", config.formatMultiplier(15));
+        assertEquals("2", config.formatMultiplier(20));
+        Messages messages = Messages.parse(bundled("messages.yml"), bundled("messages.yml"), config,
+                Logger.getAnonymousLogger(), new Messages.Throttle());
+        assertEquals("1,5", messages.multiplier(15));
+
+        yaml.set("multiplier-decimal-separator", ";");
+        Capture capture = new Capture();
+        assertEquals('.', CoreConfig.parse(yaml, logger(capture), m -> true).decimalSeparator());
+        assertTrue(String.join("\n", capture.messages).contains("multiplier-decimal-separator"));
+    }
+
+    @Test
+    void decimalBottleName() throws Exception {
+        CoreConfig config = CoreConfig.parse(bundled("config.yml"), Logger.getAnonymousLogger(), m -> true);
+        Messages messages = Messages.parse(bundled("messages.yml"), bundled("messages.yml"), config,
+                Logger.getAnonymousLogger(), new Messages.Throttle());
+        BoostType quest = config.type("quest");
+        Component name = messages.renderItem(quest, messages.raw("bottle-item.name"),
+                "type", "quest", "type_name", quest.displayName(), "multiplier", messages.multiplier(15));
+        assertEquals("Boost Quest [x1.5]", PLAIN.serialize(name));
+        assertTrue(messages.raw("error.multiplier-decimal").contains("1.1"));
     }
 }

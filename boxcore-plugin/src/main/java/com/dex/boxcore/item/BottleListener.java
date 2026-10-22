@@ -57,9 +57,9 @@ public final class BottleListener implements Listener {
     }
 
     /** A warned-about bottle waiting for a second use inside the confirmation window. */
-    private record PendingConfirm(String type, int multiplier, long durationSeconds, Warning warning, long timestamp) {
+    private record PendingConfirm(String type, int tenths, long durationSeconds, Warning warning, long timestamp) {
         boolean matches(BottleData data, Warning current) {
-            return type.equals(data.type()) && multiplier == data.multiplier() && durationSeconds == data.durationSeconds()
+            return type.equals(data.type()) && tenths == data.tenths() && durationSeconds == data.durationSeconds()
                     && warning == current;
         }
     }
@@ -178,12 +178,12 @@ public final class BottleListener implements Listener {
         EffectiveCache.Snapshot snapshot = controller.refresh(player, now);
         int current = snapshot.effective(type.id());
         int active = snapshot.bottle(type.id());
-        int m = data.multiplier();
+        int m = data.tenths();
         int after = MultiplierCalculator.effective(snapshot.rank(type.id()), m, snapshot.global(type.id()),
-                type.maxMultiplier());
+                type.maxTenths());
 
         boolean useful = MultiplierCalculator.isUseful(snapshot.rank(type.id()), active, snapshot.global(type.id()), m,
-                type.maxMultiplier());
+                type.maxTenths());
         Warning warning;
         if (MultiplierCalculator.isRenewal(active, m)) {
             warning = Warning.SAME;                       // the active bottle's remaining time would be lost
@@ -208,8 +208,10 @@ public final class BottleListener implements Listener {
             PersonalBoost old = MultiplierCalculator.displayed(controller.registry().personal(id), type.id(), now);
             String remaining = old == null ? "" : DurationFormat.clock(DurationFormat.remainingSeconds(old.expiresAt(), now));
             msg.send(player, type, warning.key, "type", type.id(), "type_name", type.displayName(),
-                    "multiplier", m, "old", active, "remaining", remaining, "duration", msg.duration(data.durationSeconds()),
-                    "effective", current, "after", after, "seconds", cfg.confirmWindowSeconds());
+                    "multiplier", msg.multiplier(m), "old", msg.multiplier(active), "remaining", remaining,
+                    "duration", msg.duration(data.durationSeconds()),
+                    "effective", msg.multiplier(current), "after", msg.multiplier(after),
+                    "seconds", cfg.confirmWindowSeconds());
             return;
         }
         // second use inside the window: the player's informed choice
@@ -220,25 +222,25 @@ public final class BottleListener implements Listener {
         }
         // no effect: consumed, the active bottle of the type is kept unchanged
         consumeOne(player.getInventory(), hand);
-        msg.send(player, type, "bottle.used-no-effect", "type", type.id(), "type_name", type.displayName(),
-                "multiplier", m);
+        msg.notify(player, type, "bottle.used-no-effect", "type", type.id(), "type_name", type.displayName(),
+                "multiplier", msg.multiplier(m));
     }
 
     /** Consumes the bottle, then replaces the active bottle of the type (if any). */
     private void activate(Player player, ItemStack hand, BoostType type, BottleData data, long now) {
         CoreConfig cfg = config.get();
         Messages msg = messages.get();
-        int m = data.multiplier();
+        int m = data.tenths();
         consumeOne(player.getInventory(), hand);
         PersonalBoost replaced = controller.setPersonal(player, new PersonalBoost(type.id(), m,
                 now + data.durationSeconds() * 1000L, data.durationSeconds()), now);
         if (replaced != null) {
-            msg.send(player, type, "bottle.replaced", "type", type.id(), "type_name", type.displayName(),
-                    "old", replaced.multiplier(), "multiplier", m,
+            msg.notify(player, type, "bottle.replaced", "type", type.id(), "type_name", type.displayName(),
+                    "old", msg.multiplier(replaced.tenths()), "multiplier", msg.multiplier(m),
                     "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(replaced.expiresAt(), now)));
         }
-        msg.send(player, type, "bottle.used", "type", type.id(), "type_name", type.displayName(),
-                "multiplier", m, "duration", msg.duration(data.durationSeconds()));
+        msg.notify(player, type, "bottle.used", "type", type.id(), "type_name", type.displayName(),
+                "multiplier", msg.multiplier(m), "duration", msg.duration(data.durationSeconds()));
         if (cfg.successSound() != null) {
             player.playSound(Sound.sound(cfg.successSound(), Sound.Source.PLAYER, 1f, 1f), Sound.Emitter.self());
         }

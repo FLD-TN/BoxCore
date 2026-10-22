@@ -4,7 +4,8 @@ package com.dex.boxcore.item;
  * Boost data carried by a bottle's PersistentDataContainer (§6.2).
  *
  * @param type            type id
- * @param multiplier      multiplier
+ * @param tenths          multiplier in tenths (Update 04 D1), from {@code boost_multiplier_tenths} or
+ *                        {@code boost_multiplier x 10}
  * @param durationSeconds duration in seconds
  */
-public record BottleData(String type, int multiplier, long durationSeconds) {}
+public record BottleData(String type, int tenths, long durationSeconds) {}

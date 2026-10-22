@@ -1,6 +1,7 @@
 package com.dex.boxcore.command;
 
 import com.dex.boxcore.api.GemResult;
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.boost.BoostController;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.boost.GlobalBoost;
@@ -54,6 +55,8 @@ public final class BoxCoreCommand implements TabExecutor {
     private static final List<String> GEM_ACTIONS = List.of("give", "take", "set", "check");
     private static final List<String> GEM_AMOUNTS = List.of("10", "100", "1000");
     private static final List<String> MULTIPLIERS = List.of("2", "3", "5", "10");
+    /** Suggestions for a type with {@code decimal: true} (Update 04 D7). */
+    private static final List<String> DECIMAL_MULTIPLIERS = List.of("1.5", "2", "2.5", "3", "5", "10");
     private static final List<String> DURATIONS = List.of("10m", "30m", "1h");
     private static final List<String> AMOUNTS = List.of("1", "16", "32", "64");
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm dd/MM");
@@ -141,6 +144,7 @@ public final class BoxCoreCommand implements TabExecutor {
         }
 
         CoreConfig cfg = config.get();
+        String multiplierText = msg.multiplier(multiplier);
         int remaining = amount;
         while (remaining > 0) {
             ItemStack stack = factory.create(type, multiplier, duration, remaining, cfg, msg);
@@ -152,9 +156,9 @@ public final class BoxCoreCommand implements TabExecutor {
 
         String durationText = msg.duration(duration);
         msg.send(sender, type, "give.done", "amount", amount, "type", type.id(), "type_name", type.displayName(),
-                "multiplier", multiplier, "duration", durationText, "player", target.getName());
-        msg.send(target, type, "give.received", "amount", amount, "type", type.id(), "type_name", type.displayName(),
-                "multiplier", multiplier, "duration", durationText);
+                "multiplier", multiplierText, "duration", durationText, "player", target.getName());
+        msg.notify(target, type, "give.received", "amount", amount, "type", type.id(), "type_name", type.displayName(),
+                "multiplier", multiplierText, "duration", durationText);
     }
 
     // ------------------------------------------------------------------ global
@@ -179,14 +183,15 @@ public final class BoxCoreCommand implements TabExecutor {
                 long duration = duration(sender, type, args[4]);
                 if (duration <= 0) return;
                 GlobalBoost replaced = controller.startGlobal(type, multiplier, duration, now);
+                String multiplierText = msg.multiplier(multiplier);
                 if (replaced != null) {
                     msg.send(sender, type, "global.replaced", "type", type.id(), "type_name", type.displayName(),
-                            "old", replaced.multiplier(), "multiplier", multiplier);
+                            "old", msg.multiplier(replaced.tenths()), "multiplier", multiplierText);
                 }
                 msg.broadcast(type, "global.started", "type", type.id(), "type_name", type.displayName(),
-                        "multiplier", multiplier, "duration", msg.duration(duration));
+                        "multiplier", multiplierText, "duration", msg.duration(duration));
                 msg.broadcast(type, "global.no-stack-note", "type", type.id(), "type_name", type.displayName(),
-                        "multiplier", multiplier);
+                        "multiplier", multiplierText);
             }
             case "stop" -> {
                 if (args.length != 3) {
@@ -236,15 +241,15 @@ public final class BoxCoreCommand implements TabExecutor {
             int bottle = snapshot.bottle(id);
             int global = snapshot.global(id);
             msg.sendLine(sender, type, msg.raw("check.type"), "type", id, "type_name", type.displayName(),
-                    "effective", snapshot.effective(id), "max", type.maxMultiplier());
-            msg.sendLine(sender, type, msg.raw("check.sum"), "rank", rank, "bottle", bottle,
-                    "personal", snapshot.personal(id));
+                    "effective", msg.multiplier(snapshot.effective(id)), "max", msg.multiplier(type.maxTenths()));
+            msg.sendLine(sender, type, msg.raw("check.sum"), "rank", msg.multiplier(rank),
+                    "bottle", msg.multiplier(bottle), "personal", msg.multiplier(snapshot.personal(id)));
             GlobalBoost g = controller.registry().global(id);
             if (global == 0 || g == null) {
                 msg.sendLine(sender, type, msg.raw("check.global-none"));
             } else {
                 String key = MultiplierCalculator.globalWins(rank, bottle, global) ? "check.global-used" : "check.global";
-                msg.sendLine(sender, type, msg.raw(key), "multiplier", global,
+                msg.sendLine(sender, type, msg.raw(key), "multiplier", msg.multiplier(global),
                         "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(g.expiresAt(), now)),
                         "time", clock.format(Instant.ofEpochMilli(g.expiresAt())));
             }
@@ -252,12 +257,12 @@ public final class BoxCoreCommand implements TabExecutor {
             if (active == null) {
                 msg.sendLine(sender, type, msg.raw("check.bottle-none"));
             } else {
-                msg.sendLine(sender, type, msg.raw("check.bottle"), "multiplier", active.multiplier(),
+                msg.sendLine(sender, type, msg.raw("check.bottle"), "multiplier", msg.multiplier(active.tenths()),
                         "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(active.expiresAt(), now)),
                         "time", clock.format(Instant.ofEpochMilli(active.expiresAt())));
             }
-            if (MultiplierCalculator.personal(rank, bottle) > type.maxMultiplier() || global > type.maxMultiplier()) {
-                msg.sendLine(sender, type, msg.raw("check.capped"), "max", type.maxMultiplier());
+            if (MultiplierCalculator.personal(rank, bottle) > type.maxTenths() || global > type.maxTenths()) {
+                msg.sendLine(sender, type, msg.raw("check.capped"), "max", msg.multiplier(type.maxTenths()));
             }
         }
     }
@@ -436,13 +441,16 @@ public final class BoxCoreCommand implements TabExecutor {
         return type;
     }
 
+    /** {@code 2}, {@code 1.5} or {@code 1,5} in tenths (Update 04 D7), {@code null} with an error if invalid. */
     private Integer multiplier(CommandSender sender, BoostType type, String raw) {
-        long value = parseInt(raw);
-        if (!type.isValidMultiplier(value)) {
-            messages.get().send(sender, "error.multiplier", "max", type.maxMultiplier());
+        int tenths = Multipliers.parse(raw);
+        if (!type.isValidMultiplier(tenths)) {
+            Messages msg = messages.get();
+            msg.send(sender, type.decimal() ? "error.multiplier-decimal" : "error.multiplier",
+                    "max", msg.multiplier(type.maxTenths()));
             return null;
         }
-        return (int) value;
+        return tenths;
     }
 
     private long duration(CommandSender sender, BoostType type, String raw) {
@@ -492,7 +500,7 @@ public final class BoxCoreCommand implements TabExecutor {
             case "give" -> switch (args.length) {
                 case 2 -> filter(players(), args[1]);
                 case 3 -> filter(types, args[2]);
-                case 4 -> filter(MULTIPLIERS, args[3]);
+                case 4 -> filter(multipliers(args[2]), args[3]);
                 case 5 -> filter(DURATIONS, args[4]);
                 case 6 -> filter(AMOUNTS, args[5]);
                 default -> List.of();
@@ -503,7 +511,7 @@ public final class BoxCoreCommand implements TabExecutor {
                 if (action.equals("start")) {
                     yield switch (args.length) {
                         case 3 -> filter(types, args[2]);
-                        case 4 -> filter(MULTIPLIERS, args[3]);
+                        case 4 -> filter(multipliers(args[2]), args[3]);
                         case 5 -> filter(DURATIONS, args[4]);
                         default -> List.of();
                     };
@@ -525,6 +533,11 @@ public final class BoxCoreCommand implements TabExecutor {
             }
             default -> List.of();
         };
+    }
+
+    private List<String> multipliers(String rawType) {
+        BoostType type = config.get().type(rawType.toLowerCase(Locale.ROOT));
+        return type != null && type.decimal() ? DECIMAL_MULTIPLIERS : MULTIPLIERS;
     }
 
     private static List<String> players() {

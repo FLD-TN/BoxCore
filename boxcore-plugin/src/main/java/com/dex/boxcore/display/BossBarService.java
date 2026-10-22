@@ -20,18 +20,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * Bossbars (§7.2): one shared bar per active global type, and per player at most one bar per type for the
  * highest active personal boost. Keeps no {@link Player} references; bars are keyed by type and UUID.
  * Main thread only.
+ *
+ * <p>A title is parsed (placeholders, small caps, MiniMessage) only when what it shows changes; the remaining time,
+ * which changes every second, is a marker in the parsed title that {@link #withRemaining} replaces with plain text
+ * (keeping the style around it), so the per-second update does no parsing.
  */
 public final class BossBarService {
+
+    /** Stands for {@code %remaining%} in a parsed title: a private-use character that small caps and MiniMessage keep. */
+    static final String REMAINING = "\uE000";
+    private static final Pattern REMAINING_PATTERN = Pattern.compile(REMAINING, Pattern.LITERAL);
 
     private static final class GlobalBar {
         final BossBar bar;
         GlobalBoost boost;
-        String title;
+        /** Parsed title with the {@link #REMAINING} marker, {@code null} when it must be rebuilt. */
+        Component base;
+        /** Remaining time last shown. */
+        String remaining;
 
         GlobalBar(BossBar bar, GlobalBoost boost) {
             this.bar = bar;
@@ -45,7 +57,10 @@ public final class BossBarService {
         int effective;
         int rank;
         int global;
-        String title;
+        /** Parsed title with the {@link #REMAINING} marker, {@code null} when it must be rebuilt. */
+        Component base;
+        /** Remaining time last shown. */
+        String remaining;
 
         PersonalBar(BossBar bar) {
             this.bar = bar;
@@ -60,7 +75,7 @@ public final class BossBarService {
             this.effective = effective;
             this.rank = rank;
             this.global = global;
-            this.title = null;
+            this.base = null;
             return true;
         }
     }
@@ -99,21 +114,26 @@ public final class BossBarService {
                 for (Player player : Bukkit.getOnlinePlayers()) player.showBossBar(created.bar);
             } else if (!existing.boost.equals(boost)) {
                 existing.boost = boost;
-                existing.title = null;
+                existing.base = null;
                 updateGlobal(existing, type, now);
             }
         }
     }
 
     private void updateGlobal(GlobalBar gb, BoostType type, long now) {
-        String title = Messages.fill(messages.get().raw("bossbar.global"),
-                "type", type.id(),
-                "type_name", type.displayName(),
-                "multiplier", gb.boost.multiplier(),
-                "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(gb.boost.expiresAt(), now)));
-        if (title.equals(gb.title)) return;
-        gb.title = title;
-        gb.bar.name(messages.get().parseStyled(type, title));
+        if (gb.base == null) {
+            Messages msg = messages.get();
+            gb.base = msg.parseStyled(type, Messages.fill(msg.raw("bossbar.global"),
+                    "type", type.id(),
+                    "type_name", type.displayName(),
+                    "multiplier", msg.multiplier(gb.boost.tenths()),
+                    "remaining", REMAINING));
+            gb.remaining = null;
+        }
+        String remaining = DurationFormat.clock(DurationFormat.remainingSeconds(gb.boost.expiresAt(), now));
+        if (remaining.equals(gb.remaining)) return;
+        gb.remaining = remaining;
+        gb.bar.name(withRemaining(gb.base, remaining));
         gb.bar.progress(gb.boost.progress(now));
     }
 
@@ -143,7 +163,7 @@ public final class BossBarService {
         for (BoostType type : cfg.typeList()) {
             PersonalBoost shown = MultiplierCalculator.displayed(personal, type.id(), now);
             if (shown == null) continue;
-            int effective = snapshot == null ? shown.multiplier() : snapshot.effective(type.id());
+            int effective = snapshot == null ? shown.tenths() : snapshot.effective(type.id());
             int rank = snapshot == null ? 0 : snapshot.rank(type.id());
             int global = snapshot == null ? 0 : snapshot.global(type.id());
             if (bars == null) {
@@ -165,29 +185,43 @@ public final class BossBarService {
     }
 
     private void updatePersonal(PersonalBar pb, BoostType type, long now) {
-        Messages msg = messages.get();
+        if (pb.base == null) {
+            pb.base = personalTitle(messages.get(), type, pb.boost.tenths(), pb.effective, pb.rank, pb.global);
+            pb.remaining = null;
+        }
         String remaining = DurationFormat.clock(DurationFormat.remainingSeconds(pb.boost.expiresAt(), now));
+        if (remaining.equals(pb.remaining)) return;
+        pb.remaining = remaining;
+        pb.bar.name(withRemaining(pb.base, remaining));
+        pb.bar.progress(pb.boost.progress(now));
+    }
+
+    /** The parsed personal title with the {@link #REMAINING} marker (rebuilt only when the shown state changes). */
+    static Component personalTitle(Messages msg, BoostType type, int tenths, int effective, int rank, int global) {
         String title = Messages.fill(msg.raw("bossbar.personal"),
                 "type", type.id(),
                 "type_name", type.displayName(),
-                "multiplier", pb.boost.multiplier(),
-                "remaining", remaining,
-                "effective", pb.effective);
+                "multiplier", msg.multiplier(tenths),
+                "remaining", REMAINING,
+                "effective", msg.multiplier(effective));
         // U3: "đang dùng" when the global boost determines the value, "tổng" when stacked with a rank
-        if (MultiplierCalculator.globalWins(pb.rank, pb.boost.multiplier(), pb.global)) {
-            title = title + Messages.fill(msg.raw("bossbar.personal-suffix"), "effective", pb.effective);
-        } else if (pb.rank > 0) {
-            title = title + Messages.fill(msg.raw("bossbar.personal-suffix-total"), "effective", pb.effective);
+        if (MultiplierCalculator.globalWins(rank, tenths, global)) {
+            title = title + Messages.fill(msg.raw("bossbar.personal-suffix"), "effective", msg.multiplier(effective));
+        } else if (rank > 0) {
+            title = title + Messages.fill(msg.raw("bossbar.personal-suffix-total"), "effective",
+                    msg.multiplier(effective));
         }
-        if (title.equals(pb.title)) return;
-        pb.title = title;
-        pb.bar.name(msg.parseStyled(type, title));
-        pb.bar.progress(pb.boost.progress(now));
+        return msg.parseStyled(type, title);
+    }
+
+    /** {@code base} with the {@link #REMAINING} marker replaced by {@code remaining}, in the marker's style. */
+    static Component withRemaining(Component base, String remaining) {
+        return base.replaceText(b -> b.match(REMAINING_PATTERN).replacement(remaining));
     }
 
     // ------------------------------------------------------------------ lifecycle
 
-    /** Updates titles and progress of all visible bars; setters are only called when the text changed. */
+    /** Updates the remaining time and progress of all visible bars; setters are only called when it changed. */
     public void tick(long now) {
         CoreConfig cfg = config.get();
         for (Map.Entry<String, GlobalBar> e : globalBars.entrySet()) {

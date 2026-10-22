@@ -1,5 +1,6 @@
 package com.dex.boxcore.config;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.util.DurationFormat;
 import com.dex.boxcore.util.SmallCaps;
 import net.kyori.adventure.text.Component;
@@ -43,7 +44,11 @@ public final class Messages {
     private static final String GEM_PREFIX = "gem.";
     private static final String GEM_PLACEHOLDER = "%gem%";
 
-    /** Anti-spam state, shared between reloads, owned by the plugin, main thread only. */
+    /**
+     * Anti-spam state for {@link #send}: replies to what a player does (errors, warnings, command replies), at most
+     * one per key and second. Broadcasts and event notifications ({@link #notify}) are never throttled. Shared
+     * between reloads, owned by the plugin, main thread only.
+     */
     public static final class Throttle {
         private final Map<UUID, Map<String, Integer>> lastSent = new HashMap<>();
 
@@ -75,9 +80,10 @@ public final class Messages {
     private final DurationFormat.Units units;
     private final Throttle throttle;
     private final boolean smallCaps;
+    private final char decimalSeparator;
 
     private Messages(Map<String, String> strings, Map<String, List<String>> lists, TagResolver palette,
-                     Map<String, TagResolver> typed, Throttle throttle, boolean smallCaps) {
+                     Map<String, TagResolver> typed, Throttle throttle, boolean smallCaps, char decimalSeparator) {
         this.strings = strings;
         this.lists = lists;
         this.prefix = strings.getOrDefault("prefix", "");
@@ -85,6 +91,7 @@ public final class Messages {
         this.typed = typed;
         this.throttle = throttle;
         this.smallCaps = smallCaps;
+        this.decimalSeparator = decimalSeparator;
         this.units = new DurationFormat.Units(
                 strings.getOrDefault("units.second", "giây"),
                 strings.getOrDefault("units.minute", "phút"),
@@ -183,7 +190,8 @@ public final class Messages {
         for (BoostType type : config.typeList()) {
             typed.put(type.id(), withType(base, type.textColor() != null ? type.textColor() : textColor));
         }
-        return new Messages(Map.copyOf(strings), Map.copyOf(lists), palette, Map.copyOf(typed), throttle, config.smallCaps());
+        return new Messages(Map.copyOf(strings), Map.copyOf(lists), palette, Map.copyOf(typed), throttle, config.smallCaps(),
+                config.decimalSeparator());
     }
 
     private static TagResolver withType(List<TagResolver> base, TextColor typeColor) {
@@ -229,6 +237,11 @@ public final class Messages {
 
     public String duration(long seconds) {
         return DurationFormat.format(seconds, units);
+    }
+
+    /** A multiplier in tenths for {@code %multiplier%}-like placeholders: {@code 15} → {@code 1.5} (Update 04 D7). */
+    public String multiplier(int tenths) {
+        return Multipliers.format(tenths, decimalSeparator);
     }
 
     /** The click word ({@code Chuột phải} / {@code Chuột trái}) for the configured use click. */
@@ -289,7 +302,11 @@ public final class Messages {
 
     // ------------------------------------------------------------------ sending
 
-    /** Sends a keyed chat message with prefix; empty messages are skipped; players are throttled per key. */
+    /**
+     * Sends a keyed reply to something the sender did (an error, a warning, a command result), with prefix; empty
+     * messages are skipped; players are throttled per key so spamming a click or a command cannot flood the chat.
+     * Use {@link #notify} for events that must never be dropped.
+     */
     public void send(CommandSender to, String key, Object... placeholders) {
         send(to, (BoostType) null, key, placeholders);
     }
@@ -303,13 +320,18 @@ public final class Messages {
     }
 
     /**
-     * Sends a keyed chat message with prefix and without throttling: for notifications that must never be
-     * dropped (gems received, a transfer received). Empty messages are skipped.
+     * Sends a keyed chat message with prefix and without throttling: for events that must never be dropped
+     * (a bottle used or expired, a bottle or gems received, a transfer received). Empty messages are skipped.
      */
     public void notify(CommandSender to, String key, Object... placeholders) {
+        notify(to, (BoostType) null, key, placeholders);
+    }
+
+    /** Like {@link #notify(CommandSender, String, Object...)} with {@code <type>} coloured for {@code type}. */
+    public void notify(CommandSender to, BoostType type, String key, Object... placeholders) {
         String template = raw(key);
         if (template.isEmpty() || to == null) return;
-        to.sendMessage(parse(prefix + fill(template, placeholders)));
+        to.sendMessage(parse(type, prefix + fill(template, placeholders)));
     }
 
     /**
@@ -323,7 +345,7 @@ public final class Messages {
         to.showTitle(Title.title(render(type, title, placeholders), render(type, subtitle, placeholders)));
     }
 
-    /** Sends a keyed message to every online player and the console. */
+    /** Sends a keyed message to every online player and the console, never throttled. */
     public void broadcast(String key, Object... placeholders) {
         broadcast((BoostType) null, key, placeholders);
     }
@@ -333,9 +355,7 @@ public final class Messages {
         String template = raw(key);
         if (template.isEmpty()) return;
         Component component = parse(type, prefix + fill(template, placeholders));
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (throttle.allow(player.getUniqueId(), key)) player.sendMessage(component);
-        }
+        for (Player player : Bukkit.getOnlinePlayers()) player.sendMessage(component);
         Bukkit.getConsoleSender().sendMessage(component);
     }
 

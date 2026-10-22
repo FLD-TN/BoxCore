@@ -10,8 +10,12 @@ import java.util.UUID;
  *
  * <p>The effective multiplier of a player for a type combines the player's rank permission, active personal
  * bottle and the server-wide (global) boost according to the rules of the installed BoxCore version
- * (1.1.0: {@code max(rank + bottle, global)}, capped per type). It is always an integer {@code >= 1};
- * {@code 1} means "no boost".
+ * (1.1.0: {@code max(rank + bottle, global)}, capped per type). It is at least x1 ("no boost").
+ *
+ * <p>Since 1.4.0 a type declared with {@code decimal: true} in BoxCore's config (by default only {@code quest})
+ * may have one decimal, e.g. x1.5. Read it with {@link #getMultiplierTenths} ({@code 15}) and apply it with the
+ * helpers of {@link Multipliers}; {@link #getMultiplier} returns only the whole part. Types declared with
+ * {@code decimal: false} (by default {@code mining}) are always whole, so {@link #getMultiplier} is exact for them.
  *
  * <p>Guarantees:
  * <ul>
@@ -25,7 +29,8 @@ import java.util.UUID;
 public interface BoostService {
 
     /**
-     * Effective multiplier (always >= 1) of an ONLINE player for a boost type.
+     * Whole part of the effective multiplier (always >= 1) of an ONLINE player for a boost type: x1.5 → 1,
+     * x2.5 → 2. Exact for types declared with {@code decimal: false}; use {@link #getMultiplierTenths} otherwise.
      * Returns 1 if the player is offline or the type is not declared.
      * Thread-safe, O(1), allocation-free: reads a precomputed cache.
      *
@@ -36,6 +41,29 @@ public interface BoostService {
     int getMultiplier(UUID playerId, String type);
 
     /**
+     * Effective multiplier in tenths ({@code 15} = x1.5), always {@code >= 10}. Same guarantees as
+     * {@link #getMultiplier}; always a multiple of 10 for a type declared with {@code decimal: false}.
+     * Returns 10 if the player is offline or the type is not declared.
+     *
+     * @param playerId the player's UUID; {@code null} returns 10
+     * @param type     the boost type id; {@code null} returns 10
+     * @return the effective multiplier in tenths, never less than 10
+     * @since 1.2.0
+     */
+    default int getMultiplierTenths(UUID playerId, String type) {
+        return getMultiplier(playerId, type) * Multipliers.ONE;
+    }
+
+    /**
+     * Effective multiplier as a double ({@code 1.5}), always {@code >= 1}.
+     *
+     * @since 1.2.0
+     */
+    default double getMultiplierExact(UUID playerId, String type) {
+        return getMultiplierTenths(playerId, type) / 10.0;
+    }
+
+    /**
      * True if the type is declared in BoxCore's config.
      *
      * @param type the boost type id; {@code null} returns false
@@ -44,8 +72,8 @@ public interface BoostService {
     boolean isType(String type);
 
     /**
-     * Convenience: amount * getMultiplier(playerId, type), computed in long,
-     * saturating at Long.MAX_VALUE instead of overflowing. amount <= 0 is returned unchanged.
+     * Convenience: {@code floor(amount * multiplier)} with the exact multiplier ({@link #getMultiplierTenths}),
+     * computed in long, saturating at Long.MAX_VALUE instead of overflowing. amount <= 0 is returned unchanged.
      *
      * @param playerId the player's UUID
      * @param type     the boost type id
@@ -53,8 +81,6 @@ public interface BoostService {
      * @return the multiplied amount
      */
     default long multiply(UUID playerId, String type, long amount) {
-        if (amount <= 0) return amount;
-        int m = getMultiplier(playerId, type);
-        return m <= 1 ? amount : (amount > Long.MAX_VALUE / m ? Long.MAX_VALUE : amount * m);
+        return Multipliers.floor(amount, getMultiplierTenths(playerId, type));
     }
 }

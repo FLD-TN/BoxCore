@@ -1,4 +1,4 @@
-# BoxCore — Integration Guide (BoxCore 1.3.0, API 1.1.0)
+# BoxCore — Integration Guide (BoxCore 1.4.0, API 1.2.0)
 
 This is the only document you need to integrate a plugin with BoxCore. Do not modify BoxCore; use the API below.
 
@@ -6,20 +6,22 @@ BoxCore 1.1.0 changed how the multiplier is computed on the server side, but the
 
 BoxCore 1.3.0 adds the **GEM** currency and API `com.dex:boxcore-api:1.1.0`, which only **adds** `GemService` and `GemResult` (§10). `BoostService` and `BoostTypes` are unchanged: plugins built against `boxcore-api-1.0.0` need no change and no rebuild. Use 1.1.0 only if you need gems.
 
+BoxCore 1.4.0 (API `com.dex:boxcore-api:1.2.0`) allows **decimal multipliers** (one decimal, e.g. x1.5) for the types declared with `decimal: true` in BoxCore's `config.yml` (by default only `quest`; `mining` stays whole). The API only **adds** default methods (`getMultiplierTenths`, `getMultiplierExact`) and the helper class `Multipliers` (§11). `getMultiplier` keeps its signature and returns the **whole part** (x1.5 → 1), so a plugin built against an older API never gives more than the boost; it only misses the decimal part. A plugin whose type is whole (`mining`) needs no change.
+
 ## 1. What BoxCore does
 
-BoxCore is the core plugin of the BoxPvP server. Version 1 provides **boosts**: an integer multiplier per player and per *boost type* (`mining`, `quest`, …). A player's multiplier for a type comes from three sources: a rank permission, the player's active personal boost bottle, and a server-wide (global) boost started by an admin. Your plugin asks BoxCore for the multiplier at the moment it grants something and multiplies the amount.
+BoxCore is the core plugin of the BoxPvP server. Version 1 provides **boosts**: a multiplier per player and per *boost type* (`mining`, `quest`, …), a whole number or, for decimal types, a number with one decimal. A player's multiplier for a type comes from three sources: a rank permission, the player's active personal boost bottle, and a server-wide (global) boost started by an admin. Your plugin asks BoxCore for the multiplier at the moment it grants something and multiplies the amount.
 
-> **Rule:** a player's multiplier is `max(rank + active personal bottle, global)` (a player has at most one active bottle per type), capped per type; absent sources count as 0 and the result is at least 1. It is always an integer.
+> **Rule:** a player's multiplier is `max(rank + active personal bottle, global)` (a player has at most one active bottle per type), capped per type; absent sources count as 0 and the result is at least x1. It is a whole number, or has one decimal (x1.5) for a type declared with `decimal: true` (by default only `quest`); read it with `getMultiplierTenths` (§11).
 
-`1` means "no boost". All combination rules, timing, expiry, display and storage are handled by BoxCore; your plugin only reads the final integer.
+x1 means "no boost". All combination rules, timing, expiry, display and storage are handled by BoxCore; your plugin only reads the final value.
 
 ## 2. Dependency
 
 | Item | Value |
 |---|---|
-| API jar | `boxcore-api-1.1.0.jar` (boosts only: `1.0.0` still works) |
-| Maven coordinates | `com.dex:boxcore-api:1.1.0` |
+| API jar | `boxcore-api-1.2.0.jar` (whole boosts only: `1.0.0` still works) |
+| Maven coordinates | `com.dex:boxcore-api:1.2.0` |
 | Java | 21 |
 | Repository | `mavenLocal()` (installed with `publishToMavenLocal` from the BoxCore repository) |
 
@@ -85,23 +87,31 @@ import java.util.UUID;
 public interface BoostService {
 
     /**
-     * Effective multiplier (always >= 1) of an ONLINE player for a boost type.
-     * Returns 1 if the player is offline or the type is not declared.
+     * Whole part of the effective multiplier (always >= 1) of an ONLINE player for a boost type: x1.5 -> 1.
+     * Exact for types declared with decimal: false. Returns 1 if the player is offline or the type is not declared.
      * Thread-safe, O(1), allocation-free: reads a precomputed cache.
      */
     int getMultiplier(UUID playerId, String type);
+
+    /** Effective multiplier in tenths (15 = x1.5), always >= 10. Same guarantees. @since 1.2.0 */
+    default int getMultiplierTenths(UUID playerId, String type) {
+        return getMultiplier(playerId, type) * Multipliers.ONE;
+    }
+
+    /** Effective multiplier as a double (1.5), always >= 1. @since 1.2.0 */
+    default double getMultiplierExact(UUID playerId, String type) {
+        return getMultiplierTenths(playerId, type) / 10.0;
+    }
 
     /** True if the type is declared in BoxCore's config. */
     boolean isType(String type);
 
     /**
-     * Convenience: amount * getMultiplier(playerId, type), computed in long,
+     * Convenience: floor(amount * multiplier) with the exact multiplier, computed in long,
      * saturating at Long.MAX_VALUE instead of overflowing. amount <= 0 is returned unchanged.
      */
     default long multiply(UUID playerId, String type, long amount) {
-        if (amount <= 0) return amount;
-        int m = getMultiplier(playerId, type);
-        return m <= 1 ? amount : (amount > Long.MAX_VALUE / m ? Long.MAX_VALUE : amount * m);
+        return Multipliers.floor(amount, getMultiplierTenths(playerId, type));
     }
 }
 ```
@@ -207,11 +217,11 @@ economy.depositPlayer(player, reward);
 player.sendMessage("Reward: " + reward);
 ```
 
-If your amounts are decimals (`double`), convert to a `long` in the smallest unit you use (for example cents) before calling `multiply`, or multiply by `getMultiplier(...)` yourself — the multiplier is always an integer.
+If your amounts are decimals (`double`), convert to a `long` in the smallest unit you use (for example cents) before calling `multiply`, or multiply by `getMultiplier(...)` yourself — the multiplier of a whole type is always an integer. For a decimal type see §11.
 
 ## 8. Testing the integration
 
-All commands work from the server console. `<duration>` accepts `30s`, `10m`, `1h30m`, `2d` (up to the type's configured maximum, 24h by default); `<multiplier>` is an integer from 2 to the type's maximum (100 by default).
+All commands work from the server console. `<duration>` accepts `30s`, `10m`, `1h30m`, `2d` (up to the type's configured maximum, 24h by default); `<multiplier>` is an integer from 2 to the type's maximum (100 by default), or for a decimal type a number from 1.1 with at most one decimal (`1.5`, `1,5`).
 
 Run the steps in order. The rank permission `boxcore.boost.mining.3` is kept during all steps after it is granted.
 
@@ -225,16 +235,18 @@ Run the steps in order. The rank permission `boxcore.boost.mining.3` is kept dur
 | Bottle expires | wait 5 min | 3 (rank only) |
 | Without BoxCore | remove `BoxCore.jar`, restart | your plugin enables normally, multipliers are 1, no errors |
 
+Decimal type (`quest`): rank permission `boxcore.boost.quest.1_5` + `/boxcore give <player> quest 2 5m` (bottle used) → `getMultiplierTenths` = 35, `getMultiplierExact` = 3.5, `getMultiplier` = 3.
+
 `/boxcore check <player>` prints, per type, the rank value, the active bottle with its remaining time, the global boost with its remaining time, the rank + bottle sum and the effective value.
 
-Every value `/boxcore check` shows as effective is exactly what `getMultiplier` returns. With PlaceholderAPI installed, `%boxcore_multiple_mining%` and `%boxcore_multiple_quest%` show the same values.
+Every value `/boxcore check` shows as effective is exactly what `getMultiplier` returns. With PlaceholderAPI installed, `%boxcore_multiple_mining%` and `%boxcore_multiple_quest%` show the same values (`1.5` for a decimal value, with the separator of `multiplier-decimal-separator`); `%boxcore_multiple_<type>_raw%` always uses a dot.
 
 ## 9. Type ids per consumer
 
 | Consumer | Type id | Multiplies |
 |---|---|---|
 | CataMines (`CataMines`) | `mining` | items obtained from mining: loot-table drops and vanilla drops of blocks broken inside a mine |
-| BoxQuest (`BoxQuest`) | `quest` | the money reward when a quest completes |
+| BoxQuest (`BoxQuest`) | `quest` (decimal) | the money reward and the `{boost:N}` amounts of reward commands when a quest completes |
 
 Use only your own type id. Types are declared in BoxCore's `config.yml`; `isType(type)` tells you whether it is declared on this server (an undeclared type simply yields multiplier 1).
 
@@ -323,3 +335,40 @@ if (!giveItems(player)) {
 ```
 
 Testing: `/boxcore gem give|take|set <player> <amount>` and `/boxcore gem check <player>` (balance and the last 5 transactions with their reasons). With PlaceholderAPI: `%boxcore_gem%`, `%boxcore_gem_formatted%`.
+
+## 11. Decimal multipliers (API 1.2.0)
+
+A type declared with `decimal: true` (by default only `quest`) may have one decimal: x1.1, x1.5, x12.5. Read it in **tenths** (`15` = x1.5) so no floating point is involved:
+
+```java
+int tenths = service.getMultiplierTenths(player, "quest");   // 15
+```
+
+`com.dex.boxcore.api.Multipliers` (static, never throws, `amount <= 0` unchanged, saturates at `Long.MAX_VALUE`):
+
+| Method | Example |
+|---|---|
+| `parse(String)` | `"1.5"` / `"1,5"` → 15, `"2"` → 20, invalid → -1 |
+| `format(int)` / `format(int, char)` | 15 → `"1.5"`, 20 → `"2"`, `format(15, ',')` → `"1,5"` |
+| `floor(long amount, int tenths)` | `floor(3, 15)` → 4 (4.5 rounded down) |
+| `halfUp(long amount, int tenths)` | `halfUp(3, 15)` → 5, `halfUp(5, 15)` → 8 (7.5) |
+
+Choose the rounding that is fair for your reward: a single item per action rounded down would make x1.5 useless (`floor(1, 15)` = 1).
+
+**Runtime compatibility.** The default methods and `Multipliers` exist only when the server runs BoxCore 1.4.0 or later. If your plugin may run with an older BoxCore, call `getMultiplierTenths` inside your hook class, fall back to `getMultiplier(...) * 10` on `NoSuchMethodError`, and do not use `Multipliers` outside the hook:
+
+```java
+public static int multiplierTenths(UUID player, String type) {
+    if (service == null) return 10;
+    if (tenthsAvailable) {
+        try {
+            return service.getMultiplierTenths(player, type);
+        } catch (NoSuchMethodError oldBoxCore) {
+            tenthsAvailable = false;   // BoxCore < 1.4.0: whole multipliers only
+        }
+    }
+    return service.getMultiplier(player, type) * 10;
+}
+```
+
+Rank permission of a decimal type: `boxcore.boost.<type>.<whole>_<digit>` (`boxcore.boost.quest.1_5` = x1.5); a dot cannot be used because it separates the permission node.

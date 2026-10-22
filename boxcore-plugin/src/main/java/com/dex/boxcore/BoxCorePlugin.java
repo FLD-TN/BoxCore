@@ -23,6 +23,7 @@ import com.dex.boxcore.item.BoostItemReader;
 import com.dex.boxcore.item.BottleKeys;
 import com.dex.boxcore.item.BottleListener;
 import com.dex.boxcore.storage.BoostStorage;
+import com.dex.boxcore.task.PermissionRefreshTask;
 import com.dex.boxcore.task.TickTask;
 import com.dex.boxcore.util.ErrorReporter;
 import org.bukkit.Bukkit;
@@ -62,7 +63,6 @@ public final class BoxCorePlugin extends JavaPlugin {
     private EffectiveCache cache;
     private BukkitTask tickTask;
     private BukkitTask permissionTask;
-    private int permissionTaskPeriod;
     private Object expansion;
 
     private GemDatabase gemDb;
@@ -87,7 +87,8 @@ public final class BoxCorePlugin extends JavaPlugin {
 
         cache = new EffectiveCache();
         bars = new BossBarService(this::coreConfig, this::messages);
-        controller = new BoostController(this::coreConfig, this::messages, throttle, registry, cache, bars, errors);
+        controller = new BoostController(this::coreConfig, this::messages, throttle, registry, cache, bars, errors,
+                this::runOnMain);
 
         BottleKeys keys = BottleKeys.of(this);
         BoostItemFactory factory = new BoostItemFactory(keys);
@@ -123,7 +124,9 @@ public final class BoxCorePlugin extends JavaPlugin {
 
         tickTask = Bukkit.getScheduler().runTaskTimer(this, new TickTask(controller, errors),
                 TickTask.PERIOD_TICKS, TickTask.PERIOD_TICKS);
-        schedulePermissionRefresh();
+        // every tick, a few players at a time; reads permission-refresh-seconds each cycle (no reschedule on reload)
+        permissionTask = Bukkit.getScheduler().runTaskTimer(this,
+                new PermissionRefreshTask(controller, () -> config.permissionRefreshSeconds(), errors), 1L, 1L);
         scheduleGemTop();
 
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
@@ -192,7 +195,6 @@ public final class BoxCorePlugin extends JavaPlugin {
         config = newConfig;
         messages = newMessages;
         controller.rebuildDisplay(System.currentTimeMillis());
-        if (permissionTaskPeriod != newConfig.permissionRefreshSeconds()) schedulePermissionRefresh();
         if (gemTopPeriod != newConfig.gem().topRefreshSeconds()) scheduleGemTop();
         else gemTop.refresh(); // size or exclusions may have changed
         messages.send(sender, "reload.done");
@@ -264,19 +266,6 @@ public final class BoxCorePlugin extends JavaPlugin {
     }
 
     // ------------------------------------------------------------------ helpers
-
-    private void schedulePermissionRefresh() {
-        if (permissionTask != null) permissionTask.cancel();
-        permissionTaskPeriod = config.permissionRefreshSeconds();
-        long period = permissionTaskPeriod * 20L;
-        permissionTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            try {
-                controller.refreshAll(System.currentTimeMillis());
-            } catch (Throwable t) {
-                errors.report("permission refresh", t);
-            }
-        }, period, period);
-    }
 
     /** Leaderboard refresh (Update 03 §5.3) and cleanup of pre-login loads whose player never joined. */
     private void scheduleGemTop() {

@@ -1,5 +1,6 @@
 package com.dex.boxcore.boost;
 
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.config.BoostType;
 import com.dex.boxcore.config.CoreConfig;
 import org.bukkit.entity.Player;
@@ -10,7 +11,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Effective multipliers of online players (§7.1). Entries are immutable snapshots that are replaced, never
+ * Effective multipliers of online players (§7.1), in tenths (Update 04 D1). Entries are immutable snapshots that are replaced, never
  * mutated, so any thread may read them. Writes happen on the main thread only.
  */
 public final class EffectiveCache {
@@ -19,7 +20,7 @@ public final class EffectiveCache {
      * Immutable per-player snapshot; all arrays are indexed by {@link BoostType#index()}.
      *
      * @param types     the declared types this snapshot was computed with (index source)
-     * @param effective effective multiplier (always >= 1)
+     * @param effective effective multiplier (always >= 10)
      * @param rank      rank value R (0 = no rank)
      * @param bottle    active personal bottle B (0 = none)
      * @param global    active global boost G (0 = none)
@@ -32,7 +33,7 @@ public final class EffectiveCache {
         }
 
         public int effective(String type) {
-            return value(effective, type, 1);
+            return value(effective, type, Multipliers.ONE);
         }
 
         public int rank(String type) {
@@ -47,7 +48,7 @@ public final class EffectiveCache {
             return value(global, type, 0);
         }
 
-        /** {@code max(R + B, 1)}. */
+        /** {@code max(R + B, 10)}. */
         public int personal(String type) {
             return MultiplierCalculator.personal(rank(type), bottle(type));
         }
@@ -55,10 +56,10 @@ public final class EffectiveCache {
 
     private final ConcurrentHashMap<UUID, Snapshot> entries = new ConcurrentHashMap<>();
 
-    /** Effective multiplier, 1 for unknown players or types. Thread-safe, allocation-free. */
+    /** Effective multiplier in tenths, 10 for unknown players or types. Thread-safe, allocation-free. */
     public int get(UUID player, String type) {
         Snapshot s = entries.get(player);
-        return s == null ? 1 : s.effective(type);
+        return s == null ? Multipliers.ONE : s.effective(type);
     }
 
     /** @return the player's snapshot, or {@code null} if the player is not online */
@@ -79,7 +80,10 @@ public final class EffectiveCache {
             int i = type.index();
             bottle[i] = MultiplierCalculator.bottle(personal, type.id(), now);
             global[i] = MultiplierCalculator.global(registry.global(type.id()), now);
-            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], type.maxMultiplier());
+            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], type.maxTenths());
+            // Update 04 D1: a whole-number type never reports a decimal, even from a boost stored while the
+            // type was decimal (the owner switched decimal off); the decimal part is dropped
+            if (!type.decimal()) effective[i] -= effective[i] % Multipliers.ONE;
         }
         Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global);
         entries.put(player.getUniqueId(), snapshot);

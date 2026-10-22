@@ -4,11 +4,11 @@ package com.dex.boxcore.boost;
  * A personal boost started by using a bottle. Stored as an absolute expiry instant (real time).
  *
  * @param type         boost type id
- * @param multiplier   multiplier, at least 2
+ * @param tenths       multiplier in tenths (Update 04 D1), at least the type's minimum
  * @param expiresAt    expiry instant, epoch milliseconds (UTC)
  * @param totalSeconds original duration, used for bossbar progress
  */
-public record PersonalBoost(String type, int multiplier, long expiresAt, long totalSeconds) {
+public record PersonalBoost(String type, int tenths, long expiresAt, long totalSeconds) {
 
     public boolean isExpired(long now) {
         return expiresAt <= now;

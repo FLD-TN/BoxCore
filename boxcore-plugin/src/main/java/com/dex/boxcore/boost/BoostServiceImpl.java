@@ -1,6 +1,7 @@
 package com.dex.boxcore.boost;
 
 import com.dex.boxcore.api.BoostService;
+import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.config.CoreConfig;
 
 import java.util.UUID;
@@ -26,16 +27,31 @@ public final class BoostServiceImpl implements BoostService {
 
     @Override
     public int getMultiplier(UUID playerId, String type) {
+        return getMultiplierTenths(playerId, type) / Multipliers.ONE;
+    }
+
+    @Override
+    public int getMultiplierTenths(UUID playerId, String type) {
         try {
             if (playerId == null || type == null) {
                 logNull(playerId, type);
-                return 1;
+                return Multipliers.ONE;
             }
             int m = cache.get(playerId, type);
-            return m < 1 ? 1 : m;
+            return m < Multipliers.ONE ? Multipliers.ONE : m;
         } catch (Throwable t) {
-            return 1;
+            return Multipliers.ONE;
         }
+    }
+
+    @Override
+    public double getMultiplierExact(UUID playerId, String type) {
+        return getMultiplierTenths(playerId, type) / 10.0;
+    }
+
+    @Override
+    public long multiply(UUID playerId, String type, long amount) {
+        return Multipliers.floor(amount, getMultiplierTenths(playerId, type));
     }
 
     @Override
@@ -52,7 +68,7 @@ public final class BoostServiceImpl implements BoostService {
         long prev = lastNullLog.get();
         if (now - prev >= NULL_LOG_INTERVAL_MS && lastNullLog.compareAndSet(prev, now)) {
             logger.warning("BoostService#getMultiplier called with a null argument (player=" + playerId
-                    + ", type=" + type + "), returning 1. Further occurrences are suppressed for 1 minute");
+                    + ", type=" + type + "), returning x1. Further occurrences are suppressed for 1 minute");
         }
     }
 }
