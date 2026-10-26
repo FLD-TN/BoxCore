@@ -19,6 +19,8 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,7 +78,8 @@ class ConfigLoadingTest {
         assertEquals(CoreConfig.UseClick.RIGHT, config.useClick());
         assertEquals(10, config.useCooldownTicks());
         assertEquals(3, config.confirmWindowSeconds());
-        assertEquals(30, config.permissionRefreshSeconds());
+        // the bundled config.yml holds the owner's value (edited 2026-10-20); 30 stays the default when missing
+        assertEquals(10, config.permissionRefreshSeconds());
         assertEquals(5, config.saveDebounceSeconds());
         assertEquals("Asia/Ho_Chi_Minh", config.timezone().getId());
         assertTrue(!config.smallCaps(), "small caps are off by default");
@@ -132,7 +135,7 @@ class ConfigLoadingTest {
         assertEquals("Boost Mining [x10]", PLAIN.serialize(name));
         assertEquals(TextDecoration.State.FALSE, name.decoration(TextDecoration.ITALIC));
         assertEquals(TextColor.fromHexString("#FFAA00"), colorOf(name));
-        assertTrue(hasBold(name), "the boost part of the bottle name is bold");
+        assertTrue(!hasBold(name), "Update 05 E2: the bottle name is not bold");
 
         BoostType quest = config.type("quest");
         Component questName = messages.renderItem(quest, messages.raw("bottle-item.name"),
@@ -150,22 +153,32 @@ class ConfigLoadingTest {
                 "• Hệ số: x10",
                 "• Thời gian: 20 phút",
                 "",
+                "Lưu ý:",
+                "• Cùng hệ số: cộng thời gian",
+                "• Hệ số thấp hơn: không dùng được",
                 "• Hướng dẫn: /booster",
                 "",
                 "[Chuột phải để kích hoạt]"), lore);
     }
 
     @Test
-    void smallCapsOnlyOnItemsChatIsNormal() throws Exception {
+    void smallCapsOnlyOnBossbarsChatAndBottlesAreNormal() throws Exception {
         YamlConfiguration yaml = bundled("config.yml");
         yaml.set("style.small-caps", true);
         CoreConfig config = CoreConfig.parse(yaml, Logger.getAnonymousLogger(), m -> true);
         Messages messages = Messages.parse(bundled("messages.yml"), bundled("messages.yml"), config,
                 Logger.getAnonymousLogger(), new Messages.Throttle());
         BoostType mining = config.type("mining");
+        // Update 05 E2: bottles never use small caps
         Component name = messages.renderItem(mining, messages.raw("bottle-item.name"),
                 "type_name", mining.displayName(), "multiplier", 10);
-        assertEquals("ʙᴏᴏꜱᴛ ᴍɪɴɪɴɢ [x10]", PLAIN.serialize(name));
+        assertEquals("Boost Mining [x10]", PLAIN.serialize(name));
+        Component clanName = messages.renderItem(mining, messages.raw("clan-bottle-item.name"),
+                "type_name", mining.displayName(), "multiplier", 10);
+        assertEquals("Boost Mining - Bang hội [x10]", PLAIN.serialize(clanName));
+        Component bar = messages.parseStyled(mining, Messages.fill(messages.raw("bossbar.personal"),
+                "type_name", mining.displayName(), "multiplier", 10, "remaining", "20:00"));
+        assertEquals("ʙᴏᴏꜱᴛ ᴍɪɴɪɴɢ x10 | 20:00", PLAIN.serialize(bar));
         Component offline = messages.render(messages.raw("error.player-offline"), "player", "Steve_<b>");
         assertEquals("✘ Người chơi Steve_<b> không trực tuyến", PLAIN.serialize(offline));
         assertEquals("20 phút", messages.duration(1200));
@@ -181,7 +194,7 @@ class ConfigLoadingTest {
         Messages messages = Messages.parse(partial, bundled("messages.yml"), config, logger(capture),
                 new Messages.Throttle());
         assertEquals("<success>custom %multiplier%", messages.raw("bottle.used"));
-        assertEquals(10, messages.rawList("bottle-item.lore").size());
+        assertEquals(13, messages.rawList("bottle-item.lore").size());
         assertTrue(String.join("\n", capture.messages).contains("bottle-item.lore"));
     }
 
@@ -312,8 +325,44 @@ class ConfigLoadingTest {
         assertEquals("Số dư: 1.250 Gem", PLAIN.serialize(line));
         List<Component> leaves = new ArrayList<>();
         flatten(line, leaves);
-        Component gemLeaf = leaves.stream().filter(c -> PLAIN.serialize(c).equals("Gem")).findFirst().orElseThrow();
+        // "1.250 Gem" is one piece in the gem colour (1.5.0)
+        Component gemLeaf = leaves.stream().filter(c -> PLAIN.serialize(c).contains("Gem")).findFirst().orElseThrow();
         assertEquals(TextColor.fromHexString("#8245F8"), gemLeaf.color());
+
+        // 1.5.0: every gem amount has the gem colour too, and the text after it goes back to its own colour
+        TextColor gem = TextColor.fromHexString("#8245F8");
+        for (String key : Messages.REPLACED_GEM_DEFAULTS.keySet()) {
+            Component c = messages.render(messages.raw(key), "amount", "777", "balance", "777", "max", "777", "min", "777",
+                    "delta", "+777", "player", "Alice", "time", "01/01 10:00", "reason", "test", "rank", "1");
+            List<Component> parts = new ArrayList<>();
+            flatten(c, parts);
+            List<Component> numbers = parts.stream().filter(p -> PLAIN.serialize(p).contains("777")).toList();
+            assertFalse(numbers.isEmpty(), key);
+            for (Component n : numbers) assertEquals(gem, n.color(), key + ": " + PLAIN.serialize(c));
+            for (Component p : parts) {
+                if (PLAIN.serialize(p).contains("Alice") || PLAIN.serialize(p).contains("khỏi")
+                        || PLAIN.serialize(p).contains("test")) {
+                    assertNotEquals(gem, p.color(), key + ": '" + PLAIN.serialize(p) + "' should not be purple");
+                }
+            }
+        }
+    }
+
+    @Test
+    void oldGemTextsAreUpgradedEditedOnesKept() throws Exception {
+        CoreConfig config = CoreConfig.parse(bundled("config.yml"), Logger.getAnonymousLogger(), m -> true);
+        YamlConfiguration server = bundled("messages.yml");
+        for (var e : Messages.REPLACED_GEM_DEFAULTS.entrySet()) server.set(e.getKey(), e.getValue().get(e.getValue().size() - 1));
+        server.set("gem.balance", "<red>Ví: %amount%");
+        Messages messages = Messages.parse(server, bundled("messages.yml"), config, Logger.getAnonymousLogger(),
+                new Messages.Throttle());
+        Messages fresh = Messages.parse(bundled("messages.yml"), bundled("messages.yml"), config,
+                Logger.getAnonymousLogger(), new Messages.Throttle());
+        for (String key : Messages.REPLACED_GEM_DEFAULTS.keySet()) {
+            if (key.equals("gem.balance")) continue;
+            assertEquals(fresh.raw(key), messages.raw(key), key);
+        }
+        assertEquals("<red>Ví: %amount%", messages.raw("gem.balance"), "an edited text is kept");
     }
 
     @Test

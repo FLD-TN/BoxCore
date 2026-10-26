@@ -9,8 +9,11 @@ config-version: 2
 #       Decimal types: boxcore.boost.<type>.<whole>_<digit>, e.g. boxcore.boost.quest.1_5 = x1.5 (a dot cannot be used)
 #   B = the active personal bottle (at most one per type; a better bottle replaces the active one)
 #   G = the global boost  /boxcore global start <type> <multiplier> <duration>
-#   effective = min( max(R + B, G, 1), max-multiplier )
-# Rank and bottle add up; the global boost never adds, it only wins when it is higher than R + B.
+#   C = the boost of the player's clan (needs BoxClans): a clan bottle (/boxcore give ... clan) used by the
+#       Minh Chủ or Phó Bang, or /clanadmin boost
+#   effective = min( max(R + B, G, C, 1), max-multiplier )
+# Rank and bottle add up; the global and the clan boost never add, they only win when they are higher.
+# A bottle of the same multiplier as the running one adds its duration (up to max-duration); a lower one is refused.
 #
 # SECURITY: players without a staff rank must NOT have creative mode. A hacked creative client can craft
 # items with arbitrary data, including boost bottles. Bottle data is re-validated against this file on
@@ -29,6 +32,8 @@ config-version: 2
 #   color           text colour of the type name in messages, bottle names and bossbar titles ('#RRGGBB')
 #   bossbar-color   colour of the bar itself, only PINK, BLUE, RED, GREEN, YELLOW, PURPLE, WHITE exist
 #                   (no orange or aqua: mining uses YELLOW, quest uses BLUE)
+#   bottle-material item of this type's bottles; POTION is a water bottle. When missing: mining HONEY_BOTTLE,
+#                   quest POTION, any other type bottle.material. Bottles always stack to 64
 # Lowering max-multiplier or max-duration makes existing bottles above the new limit unusable (not consumed).
 types:
   mining:
@@ -39,6 +44,7 @@ types:
     max-duration: 24h
     color: '#FFAA00'
     bossbar-color: YELLOW
+    bottle-material: HONEY_BOTTLE
   quest:
     display-name: 'Quest'
     description: 'Tăng x%multiplier% phần thưởng nhận được khi hoàn thành nhiệm vụ (/quest)'
@@ -47,9 +53,11 @@ types:
     max-duration: 24h
     color: '#55FFFF'
     bossbar-color: BLUE
+    bottle-material: POTION
 
 bottle:
-  # Item material of boost bottles. Vanilla behaviour (throwing, filling, placing...) is always blocked
+  # Item material of the bottles of a type without bottle-material. Vanilla behaviour (throwing, drinking,
+  # crafting, brewing, filling, placing...) is always blocked
   material: EXPERIENCE_BOTTLE
   # RIGHT or LEFT. Note: LEFT may be triggered accidentally during PvP (every swing is a left click)
   use-click: RIGHT
@@ -111,8 +119,8 @@ gem:
 
 # Server-wide text style shared with the other in-house plugins
 style:
-  # Convert bottle item names/lore and bossbar titles to small caps (a–z only; tags are never converted).
-  # Chat messages always use the normal font
+  # Convert bossbar titles to small caps (a–z only; tags are never converted).
+  # Chat messages and bottles always use the normal font
   small-caps: false
   palette:
     text: '#FFFFFF'

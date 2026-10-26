@@ -45,6 +45,72 @@ public final class Messages {
     private static final String GEM_PLACEHOLDER = "%gem%";
 
     /**
+     * Keys added in 1.5.0 (Update 05). A file written before has none of them: they come from the bundled defaults
+     * with one info line instead of one warning per key.
+     */
+    private static final List<String> ADDED_1_5_0 = List.of("bottle.extended", "bottle.full", "bottle.refused-lower",
+            "bottle.confirm-capped", "clan-bottle-item.", "give.done-clan", "give.received-clan", "clan.",
+            "bossbar.clan", "check.clan");
+
+    /**
+     * 1.4.0 default texts that 1.5.0 rewrote (bottle name without bold, lore and /booster guide for the new
+     * stacking rules). A file still holding one of them unchanged gets the new default; an edited text is kept.
+     */
+    static final Map<String, Object> REPLACED_DEFAULTS = Map.of(
+            "bottle-item.name", "<type><bold>Boost %type_name%</bold> <dark_gray>[<#FFD166>x%multiplier%<dark_gray>]",
+            "bottle-item.lore", List.of(
+                    "<#BFC7D5>%description%",
+                    "",
+                    "<#FFD166>Thông tin:",
+                    "<gray>• Loại: <type>%type_name%",
+                    "<gray>• Hệ số: <#FFD166>x%multiplier%",
+                    "<gray>• Thời gian: <#7CFC9A>%duration%",
+                    "",
+                    "<gray>• Hướng dẫn: <#7FDBFF>/booster",
+                    "",
+                    "<dark_gray>[<#7CFC9A>%click% để kích hoạt<dark_gray>]"),
+            "booster.guide", List.of(
+                    "",
+                    "<#FFD166><bold>Hướng dẫn Booster</bold>",
+                    "",
+                    "<gray>• <white>%click% <gray>vào chai boost để <#7CFC9A>kích hoạt",
+                    "<gray>• <#FFAA00>Boost Mining <gray>tăng vật phẩm nhận được khi đào khối",
+                    "<gray>• <#55FFFF>Boost Quest <gray>tăng phần thưởng nhiệm vụ <dark_gray>(/quest)",
+                    "<gray>• Multiple rank <#7CFC9A>cộng dồn <gray>với booster cá nhân <dark_gray>(chỉ tính chai đang chạy)",
+                    "<gray>• Boost global <#FF6B6B>không cộng dồn <gray>với multiple rank và booster cá nhân",
+                    "<gray>• Dùng chai khi đang có boost cùng loại cần <#FFD166>dùng lại lần 2 <gray>để xác nhận",
+                    "<gray>• Thời gian tính theo <white>giờ thực<gray>, vẫn trôi khi bạn thoát game",
+                    "<gray>• Boost đang chạy hiển thị trên <white>thanh bossbar",
+                    ""));
+
+    /**
+     * Gem texts of 1.3.0 / 1.4.0 written before the amounts took the gem colour (1.5.0). A file still holding one of
+     * them unchanged gets the new default; an edited text is kept.
+     */
+    static final Map<String, List<String>> REPLACED_GEM_DEFAULTS = Map.ofEntries(
+            Map.entry("gem.balance", List.of("<muted>Số dư: <text>%amount% %gem%")),
+            Map.entry("gem.received", List.of("<success>Bạn nhận được <aqua>%amount% %gem%", "<success>✔ Bạn nhận được <aqua>%amount% %gem%")),
+            Map.entry("gem.taken", List.of("<muted>Đã trừ %amount% %gem% khỏi tài khoản của bạn")),
+            Map.entry("gem.set", List.of("<muted>Số dư %gem% của bạn được đặt thành <text>%amount%")),
+            Map.entry("gem.admin.given", List.of("<success>✔ Đã cộng <text>%amount% %gem% <success>cho <text>%player% <muted>(số dư %balance%)")),
+            Map.entry("gem.admin.taken", List.of("<success>✔ Đã trừ <text>%amount% %gem% <success>của <text>%player% <muted>(số dư %balance%)")),
+            Map.entry("gem.admin.set", List.of("<success>✔ Đã đặt số dư %gem% của <text>%player% <success>thành <text>%amount%")),
+            Map.entry("gem.admin.insufficient", List.of("<error>✘ <text>%player% <error>chỉ có <text>%balance% %gem%")),
+            Map.entry("gem.admin.limit", List.of("<error>✘ Số dư %gem% của <text>%player% <error>sẽ vượt quá tối đa <text>%max%")),
+            Map.entry("gem.admin.check-header", List.of("<accent>%gem% của %player% <muted>• <text>%balance%")),
+            Map.entry("gem.admin.check-line", List.of("<muted>%time% <text>%delta% <muted>→ %balance% • %reason%")),
+            Map.entry("gem.pay.sent", List.of("<success>✔ Đã chuyển <text>%amount% %gem% <success>cho <text>%player%")),
+            Map.entry("gem.pay.received", List.of("<success>Bạn nhận được <aqua>%amount% %gem% <success>từ <text>%player%", "<success>✔ Bạn nhận được <aqua>%amount% %gem% <success>từ <text>%player%")),
+            Map.entry("gem.pay.insufficient", List.of("<error>✘ Bạn không đủ %gem%, số dư hiện tại: <text>%balance%")),
+            Map.entry("gem.pay.min", List.of("<error>✘ Số lượng tối thiểu là <text>%min%")),
+            Map.entry("gem.top.line", List.of("<muted>%rank%. <text>%player% <muted>• <text>%amount%")));
+
+    private static boolean addedIn150(String key) {
+        for (String prefix : ADDED_1_5_0) if (key.startsWith(prefix)) return true;
+        return false;
+    }
+
+    /**
      * Anti-spam state for {@link #send}: replies to what a player does (errors, warnings, command replies), at most
      * one per key and second. Broadcasts and event notifications ({@link #notify}) are never throttled. Shared
      * between reloads, owned by the plugin, main thread only.
@@ -129,11 +195,16 @@ public final class Messages {
         Map<String, List<String>> lists = new HashMap<>();
         String gem = gemName(config);
         int missingGem = 0;
+        int missingNew = 0;
+        int upgraded = 0;
         for (String key : defaults.getKeys(true)) {
             if (defaults.isConfigurationSection(key) || key.equals(VERSION_KEY)) continue;
-            if (key.startsWith(GEM_PREFIX) && !yaml.contains(key)) {
-                // files written before 1.3.0 have no gem messages: one info line instead of one warning per key
-                missingGem++;
+            boolean gemKey = key.startsWith(GEM_PREFIX);
+            if ((gemKey || addedIn150(key)) && !yaml.contains(key)) {
+                // files written before 1.3.0 have no gem messages, before 1.5.0 no clan boost messages: one info line
+                // instead of one warning per key
+                if (gemKey) missingGem++;
+                else missingNew++;
                 if (defaults.isList(key)) {
                     List<String> styled = new ArrayList<>();
                     for (String line : defaults.getStringList(key)) styled.add(style(line, config, gem));
@@ -143,9 +214,13 @@ public final class Messages {
                 }
                 continue;
             }
+            Object replaced = REPLACED_DEFAULTS.get(key);
             if (defaults.isList(key)) {
                 List<String> value;
-                if (yaml.isList(key)) {
+                if (yaml.isList(key) && replaced != null && replaced.equals(yaml.getStringList(key))) {
+                    upgraded++;
+                    value = defaults.getStringList(key);
+                } else if (yaml.isList(key)) {
                     value = yaml.getStringList(key);
                 } else {
                     if (yaml.contains(key)) {
@@ -160,7 +235,11 @@ public final class Messages {
                 lists.put(key, List.copyOf(styled));
             } else {
                 String value;
-                if (yaml.isString(key)) {
+                if (yaml.isString(key) && ((replaced != null && replaced.equals(yaml.getString(key)))
+                        || REPLACED_GEM_DEFAULTS.getOrDefault(key, List.of()).contains(yaml.getString(key)))) {
+                    upgraded++;
+                    value = defaults.getString(key, "");
+                } else if (yaml.isString(key)) {
                     value = yaml.getString(key);
                 } else {
                     if (yaml.contains(key)) {
@@ -177,6 +256,14 @@ public final class Messages {
         if (missingGem > 0) {
             logger.info("[" + FILE + "] " + missingGem + " gem message(s) missing, using the bundled defaults "
                     + "(copy them from the bundled messages.yml to customise)");
+        }
+        if (missingNew > 0) {
+            logger.info("[" + FILE + "] " + missingNew + " clan boost / bottle message(s) added in 1.5.0 missing, using "
+                    + "the bundled defaults (copy them from the bundled messages.yml to customise)");
+        }
+        if (upgraded > 0) {
+            logger.info("[" + FILE + "] " + upgraded + " message(s) still had the 1.4.0 default text, using the 1.5.0 "
+                    + "text (bottle name and lore, /booster guide, gem amounts in the gem colour)");
         }
 
         List<TagResolver> base = new ArrayList<>();
@@ -286,15 +373,18 @@ public final class Messages {
         return parse(type, fill(template, placeholders));
     }
 
-    /** Renders a template for an item name or lore line: small caps (if enabled), italic explicitly disabled. */
+    /**
+     * Renders a template for an item name or lore line, italic explicitly disabled. Never small caps (Update 05 E2):
+     * bottles always use the normal font.
+     */
     public Component renderItem(BoostType type, String template, Object... placeholders) {
-        return parseStyled(type, fill(template, placeholders))
+        return parse(type, fill(template, placeholders))
                 .decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
     }
 
     /**
-     * Parses a filled template with small caps (if enabled): bottle items and bossbar titles only, chat stays
-     * in the normal font. Filled values are converted too; tags are never converted.
+     * Parses a filled template with small caps (if enabled): bossbar titles only, chat and bottles stay in the
+     * normal font. Filled values are converted too; tags are never converted.
      */
     public Component parseStyled(BoostType type, String filled) {
         return parse(type, smallCaps ? SmallCaps.convert(filled) : filled);

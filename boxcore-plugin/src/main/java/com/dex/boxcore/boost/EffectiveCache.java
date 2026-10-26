@@ -24,8 +24,17 @@ public final class EffectiveCache {
      * @param rank      rank value R (0 = no rank)
      * @param bottle    active personal bottle B (0 = none)
      * @param global    active global boost G (0 = none)
+     * @param clanBoost active boost C of the player's clan (0 = none, Update 05 E3)
+     * @param clanExpiresAt expiry of that clan boost, epoch milliseconds (0 = none)
+     * @param clan      the player's clan when computed, {@code null} if none or no clan plugin
      */
-    public record Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global) {
+    public record Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global,
+                           int[] clanBoost, long[] clanExpiresAt, UUID clan) {
+
+        /** Snapshot without clan data (the clan arrays hold zeros). */
+        public Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global) {
+            this(types, effective, rank, bottle, global, new int[effective.length], new long[effective.length], null);
+        }
 
         private int value(int[] values, String type, int absent) {
             BoostType t = type == null ? null : types.get(type);
@@ -48,6 +57,17 @@ public final class EffectiveCache {
             return value(global, type, 0);
         }
 
+        /** The clan boost C of the type, 0 if none. */
+        public int clan(String type) {
+            return value(clanBoost, type, 0);
+        }
+
+        /** Expiry of the clan boost of the type, 0 if none. */
+        public long clanExpiresAt(String type) {
+            BoostType t = type == null ? null : types.get(type);
+            return t == null ? 0L : clanExpiresAt[t.index()];
+        }
+
         /** {@code max(R + B, 10)}. */
         public int personal(String type) {
             return MultiplierCalculator.personal(rank(type), bottle(type));
@@ -68,24 +88,30 @@ public final class EffectiveCache {
     }
 
     /** Recomputes and replaces a player's entry (main thread). */
-    public Snapshot recompute(Player player, CoreConfig config, BoostRegistry registry, long now) {
+    public Snapshot recompute(Player player, CoreConfig config, BoostRegistry registry, ClanLink clans, long now) {
         Map<String, BoostType> types = config.types();
         int size = types.size();
         int[] rank = PermissionReader.read(player, types);
         int[] bottle = new int[size];
         int[] global = new int[size];
+        int[] clanBoost = new int[size];
+        long[] clanExpiresAt = new long[size];
         int[] effective = new int[size];
         List<PersonalBoost> personal = registry.personal(player.getUniqueId());
+        UUID clan = clans == null ? null : clans.clanOf(player.getUniqueId());
         for (BoostType type : config.typeList()) {
             int i = type.index();
             bottle[i] = MultiplierCalculator.bottle(personal, type.id(), now);
             global[i] = MultiplierCalculator.global(registry.global(type.id()), now);
-            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], type.maxTenths());
+            ClanBoost cb = registry.clan(clan, type.id());
+            clanBoost[i] = MultiplierCalculator.clan(cb, now);
+            clanExpiresAt[i] = clanBoost[i] > 0 ? cb.expiresAt() : 0L;
+            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], clanBoost[i], type.maxTenths());
             // Update 04 D1: a whole-number type never reports a decimal, even from a boost stored while the
             // type was decimal (the owner switched decimal off); the decimal part is dropped
             if (!type.decimal()) effective[i] -= effective[i] % Multipliers.ONE;
         }
-        Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global);
+        Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global, clanBoost, clanExpiresAt, clan);
         entries.put(player.getUniqueId(), snapshot);
         return snapshot;
     }

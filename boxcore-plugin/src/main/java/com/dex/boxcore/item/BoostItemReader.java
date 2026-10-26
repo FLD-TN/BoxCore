@@ -40,7 +40,8 @@ public final class BoostItemReader {
             }
             Long duration = pdc.get(keys.duration(), PersistentDataType.LONG);
             if (type == null || duration == null) return null;
-            return new BottleData(type, tenths, duration);
+            boolean clan = BottleKeys.SCOPE_CLAN.equals(pdc.get(keys.scope(), PersistentDataType.STRING));
+            return new BottleData(type, tenths, duration, clan);
         } catch (IllegalArgumentException wrongType) {
             return null;
         }

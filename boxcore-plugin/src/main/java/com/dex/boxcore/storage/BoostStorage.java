@@ -2,6 +2,7 @@ package com.dex.boxcore.storage;
 
 import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.boost.BoostRegistry;
+import com.dex.boxcore.boost.ClanBoost;
 import com.dex.boxcore.boost.GlobalBoost;
 import com.dex.boxcore.boost.PersonalBoost;
 import com.dex.boxcore.config.BoostType;
@@ -34,7 +35,8 @@ import java.util.function.IntSupplier;
 import java.util.logging.Logger;
 
 /**
- * YAML storage of active boosts (§8): {@code global-boosts.yml} and {@code player-boosts.yml}.
+ * YAML storage of active boosts (§8): {@code global-boosts.yml}, {@code player-boosts.yml} and (Update 05 E3.6)
+ * {@code clan-boosts.yml}.
  *
  * <p>Changes mark the data dirty; a save runs at most once per debounce interval. The snapshot is taken on
  * the main thread and written asynchronously with an atomic replace. One save is in flight at a time; a
@@ -45,6 +47,7 @@ public final class BoostStorage {
 
     public static final String GLOBAL_FILE = "global-boosts.yml";
     public static final String PLAYER_FILE = "player-boosts.yml";
+    public static final String CLAN_FILE = "clan-boosts.yml";
     /** Smallest stored multiplier: x1.1. The type's own limits are applied by the effective-multiplier cache. */
     private static final int MIN_TENTHS = BoostType.MIN_DECIMAL_TENTHS;
 
@@ -55,6 +58,7 @@ public final class BoostStorage {
     private final ErrorReporter errors;
     private final File globalFile;
     private final File playerFile;
+    private final File clanFile;
 
     /** Serialises file writes between the async writer and the final synchronous save. */
     private final Object writeLock = new Object();
@@ -63,6 +67,7 @@ public final class BoostStorage {
     /** Files that could not be moved aside after a parse error: never overwrite them. */
     private volatile boolean globalBlocked;
     private volatile boolean playerBlocked;
+    private volatile boolean clanBlocked;
 
     // main thread state
     private long snapshotSeq;
@@ -78,6 +83,7 @@ public final class BoostStorage {
         this.errors = errors;
         this.globalFile = new File(plugin.getDataFolder(), GLOBAL_FILE);
         this.playerFile = new File(plugin.getDataFolder(), PLAYER_FILE);
+        this.clanFile = new File(plugin.getDataFolder(), CLAN_FILE);
     }
 
     // ------------------------------------------------------------------ load
@@ -87,7 +93,7 @@ public final class BoostStorage {
         boolean dropped = false;
 
         Map<String, GlobalBoost> globals = new LinkedHashMap<>();
-        YamlConfiguration globalYaml = read(globalFile, true);
+        YamlConfiguration globalYaml = read(globalFile, Target.GLOBAL);
         if (globalYaml != null) {
             for (String type : globalYaml.getKeys(false)) {
                 ConfigurationSection s = globalYaml.getConfigurationSection(type);
@@ -104,7 +110,7 @@ public final class BoostStorage {
         }
 
         Map<UUID, List<PersonalBoost>> personal = new HashMap<>();
-        YamlConfiguration playerYaml = read(playerFile, false);
+        YamlConfiguration playerYaml = read(playerFile, Target.PLAYER);
         if (playerYaml != null) {
             for (String key : playerYaml.getKeys(false)) {
                 UUID id;
@@ -131,6 +137,39 @@ public final class BoostStorage {
             }
         }
 
+        List<ClanBoost> clans = new ArrayList<>();
+        YamlConfiguration clanYaml = read(clanFile, Target.CLAN);
+        if (clanYaml != null) {
+            for (String key : clanYaml.getKeys(false)) {
+                UUID clan;
+                try {
+                    clan = UUID.fromString(key);
+                } catch (IllegalArgumentException ex) {
+                    logger.warning("[" + CLAN_FILE + "] Skipping invalid clan id '" + key + "'");
+                    dropped = true;
+                    continue;
+                }
+                ConfigurationSection byType = clanYaml.getConfigurationSection(key);
+                if (byType == null) {
+                    dropped = true;
+                    continue;
+                }
+                for (String type : byType.getKeys(false)) {
+                    ConfigurationSection s = byType.getConfigurationSection(type);
+                    ClanBoost boost = s == null ? null : parseClan(clan, type, s);
+                    if (boost == null) {
+                        logger.warning("[" + CLAN_FILE + "] Skipping invalid boost '" + type + "' of " + key);
+                        dropped = true;
+                    } else if (boost.isExpired(now)) {
+                        dropped = true;
+                    } else {
+                        clans.add(boost);
+                    }
+                }
+            }
+        }
+        registry.loadClans(clans);
+
         int duplicates = registry.load(globals, personal);
         if (duplicates > 0) {
             logger.info("[" + PLAYER_FILE + "] Kept one bottle per player and type, dropped " + duplicates
@@ -140,8 +179,10 @@ public final class BoostStorage {
         if (dropped) markDirty();
     }
 
+    private enum Target { GLOBAL, PLAYER, CLAN }
+
     /** Reads a YAML file; on a parse error the file is renamed {@code <file>.broken-<timestamp>}. */
-    private YamlConfiguration read(File file, boolean global) {
+    private YamlConfiguration read(File file, Target target) {
         if (!file.exists()) return null;
         YamlConfiguration yaml = new YamlConfiguration();
         try {
@@ -156,8 +197,11 @@ public final class BoostStorage {
             } catch (IOException moveEx) {
                 logger.severe("Could not rename " + file.getName() + ": " + moveEx.getMessage()
                         + ". The file will NOT be overwritten; fix or remove it and restart");
-                if (global) globalBlocked = true;
-                else playerBlocked = true;
+                switch (target) {
+                    case GLOBAL -> globalBlocked = true;
+                    case PLAYER -> playerBlocked = true;
+                    case CLAN -> clanBlocked = true;
+                }
             }
             return null;
         }
@@ -171,6 +215,16 @@ public final class BoostStorage {
         int tenths = tenths(m);
         if (tenths < MIN_TENTHS || end.longValue() <= start.longValue()) return null;
         return new GlobalBoost(type, tenths, start.longValue(), end.longValue());
+    }
+
+    private static ClanBoost parseClan(UUID clan, String type, ConfigurationSection s) {
+        if (!(s.get("multiplier") instanceof Number m) || !(s.get("started-at") instanceof Number start)
+                || !(s.get("expires-at") instanceof Number end)) {
+            return null;
+        }
+        int tenths = tenths(m);
+        if (tenths < MIN_TENTHS || end.longValue() <= start.longValue()) return null;
+        return new ClanBoost(clan, type, tenths, start.longValue(), end.longValue());
     }
 
     private static PersonalBoost parsePersonal(Map<?, ?> map) {
@@ -254,7 +308,7 @@ public final class BoostStorage {
         }
     }
 
-    private record Snapshot(long seq, YamlConfiguration global, YamlConfiguration player) {}
+    private record Snapshot(long seq, YamlConfiguration global, YamlConfiguration player, YamlConfiguration clan) {}
 
     /** Copies the registry into fresh YAML objects (main thread). */
     private Snapshot snapshot() {
@@ -278,17 +332,28 @@ public final class BoostStorage {
             }
             player.set(e.getKey().toString(), list);
         }
-        return new Snapshot(++snapshotSeq, global, player);
+        YamlConfiguration clan = new YamlConfiguration();
+        for (Map.Entry<UUID, Map<String, ClanBoost>> e : registry.allClans().entrySet()) {
+            for (ClanBoost b : e.getValue().values()) {
+                String path = e.getKey() + "." + b.type();
+                clan.set(path + ".multiplier", yamlValue(b.tenths()));
+                clan.set(path + ".started-at", b.startedAt());
+                clan.set(path + ".expires-at", b.expiresAt());
+            }
+        }
+        return new Snapshot(++snapshotSeq, global, player, clan);
     }
 
     private void write(Snapshot snapshot) throws IOException {
         String globalText = snapshot.global().saveToString();
         String playerText = snapshot.player().saveToString();
+        String clanText = snapshot.clan().saveToString();
         synchronized (writeLock) {
             if (snapshot.seq() <= writtenSeq) return; // a newer state was already written
             Files.createDirectories(plugin.getDataFolder().toPath());
             if (!globalBlocked) atomicWrite(globalFile.toPath(), globalText);
             if (!playerBlocked) atomicWrite(playerFile.toPath(), playerText);
+            if (!clanBlocked) atomicWrite(clanFile.toPath(), clanText);
             writtenSeq = snapshot.seq();
         }
     }

@@ -5,6 +5,7 @@ import com.dex.boxcore.api.GemService;
 import com.dex.boxcore.boost.BoostController;
 import com.dex.boxcore.boost.BoostRegistry;
 import com.dex.boxcore.boost.BoostServiceImpl;
+import com.dex.boxcore.boost.ClanLink;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.command.BoosterCommand;
 import com.dex.boxcore.command.BoxCoreCommand;
@@ -88,14 +89,17 @@ public final class BoxCorePlugin extends JavaPlugin {
         cache = new EffectiveCache();
         bars = new BossBarService(this::coreConfig, this::messages);
         controller = new BoostController(this::coreConfig, this::messages, throttle, registry, cache, bars, errors,
-                this::runOnMain);
+                this::runOnMain, new ClanLink(errors));
+        controller.events(event -> Bukkit.getPluginManager().callEvent(event));
 
         BottleKeys keys = BottleKeys.of(this);
         BoostItemFactory factory = new BoostItemFactory(keys);
         BoostItemReader reader = new BoostItemReader(keys);
 
+        // Update 05: clan boost calls run on the main thread; a clan plugin registers its ClanProvider here
         Bukkit.getServicesManager().register(BoostService.class,
-                new BoostServiceImpl(cache, this::coreConfig, getLogger()), this, ServicePriority.Normal);
+                new BoostServiceImpl(cache, this::coreConfig, getLogger(), controller, reader, this::runOnMain,
+                        Bukkit::isPrimaryThread), this, ServicePriority.Normal);
 
         // gems (Update 03): storage, ledger, API; a null database disables the feature, boosts keep working
         gemDb = GemDatabase.open(new File(getDataFolder(), GemDatabase.FILE), getLogger());

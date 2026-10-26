@@ -3,6 +3,7 @@ package com.dex.boxcore.command;
 import com.dex.boxcore.api.GemResult;
 import com.dex.boxcore.api.Multipliers;
 import com.dex.boxcore.boost.BoostController;
+import com.dex.boxcore.boost.ClanBoost;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.boost.GlobalBoost;
 import com.dex.boxcore.boost.MultiplierCalculator;
@@ -28,6 +29,7 @@ import org.bukkit.inventory.ItemStack;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -40,7 +42,9 @@ public final class BoxCoreCommand implements TabExecutor {
     public static final String ADMIN = "boxcore.admin";
 
     private static final String USAGE_ROOT = "/boxcore <give|global|gem|reload|check>";
-    private static final String USAGE_GIVE = "/boxcore give <player> <type> <multiplier> <duration> [amount]";
+    private static final String USAGE_GIVE = "/boxcore give <player> <type> <multiplier> <duration> [amount] [clan]";
+    /** Last argument of {@code give} for a clan bottle (Update 05 E3.4). */
+    private static final String CLAN = "clan";
     private static final String USAGE_GLOBAL = "/boxcore global <start|stop> <type> [multiplier] [duration]";
     private static final String USAGE_GLOBAL_START = "/boxcore global start <type> <multiplier> <duration>";
     private static final String USAGE_GLOBAL_STOP = "/boxcore global stop <type>";
@@ -118,6 +122,8 @@ public final class BoxCoreCommand implements TabExecutor {
 
     private void give(CommandSender sender, String[] args) {
         Messages msg = messages.get();
+        boolean clan = args.length >= 6 && args[args.length - 1].equalsIgnoreCase(CLAN);
+        if (clan) args = Arrays.copyOf(args, args.length - 1);
         if (args.length < 5 || args.length > 6) {
             usage(sender, USAGE_GIVE);
             return;
@@ -147,7 +153,7 @@ public final class BoxCoreCommand implements TabExecutor {
         String multiplierText = msg.multiplier(multiplier);
         int remaining = amount;
         while (remaining > 0) {
-            ItemStack stack = factory.create(type, multiplier, duration, remaining, cfg, msg);
+            ItemStack stack = factory.create(type, multiplier, duration, remaining, clan, cfg, msg);
             remaining -= stack.getAmount();
             for (ItemStack leftover : target.getInventory().addItem(stack).values()) {
                 target.getWorld().dropItemNaturally(target.getLocation(), leftover);
@@ -155,9 +161,11 @@ public final class BoxCoreCommand implements TabExecutor {
         }
 
         String durationText = msg.duration(duration);
-        msg.send(sender, type, "give.done", "amount", amount, "type", type.id(), "type_name", type.displayName(),
+        String done = clan ? "give.done-clan" : "give.done";
+        String received = clan ? "give.received-clan" : "give.received";
+        msg.send(sender, type, done, "amount", amount, "type", type.id(), "type_name", type.displayName(),
                 "multiplier", multiplierText, "duration", durationText, "player", target.getName());
-        msg.notify(target, type, "give.received", "amount", amount, "type", type.id(), "type_name", type.displayName(),
+        msg.notify(target, type, received, "amount", amount, "type", type.id(), "type_name", type.displayName(),
                 "multiplier", multiplierText, "duration", durationText);
     }
 
@@ -261,7 +269,19 @@ public final class BoxCoreCommand implements TabExecutor {
                         "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(active.expiresAt(), now)),
                         "time", clock.format(Instant.ofEpochMilli(active.expiresAt())));
             }
-            if (MultiplierCalculator.personal(rank, bottle) > type.maxTenths() || global > type.maxTenths()) {
+            int clanTenths = snapshot.clan(id);
+            ClanBoost clanBoost = controller.clanBoost(snapshot.clan(), id, now);
+            if (clanTenths == 0 || clanBoost == null) {
+                msg.sendLine(sender, type, msg.raw("check.clan-none"));
+            } else {
+                String key = clanTenths > Math.max(MultiplierCalculator.personal(rank, bottle), global)
+                        ? "check.clan-used" : "check.clan";
+                msg.sendLine(sender, type, msg.raw(key), "multiplier", msg.multiplier(clanTenths),
+                        "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(clanBoost.expiresAt(), now)),
+                        "time", clock.format(Instant.ofEpochMilli(clanBoost.expiresAt())));
+            }
+            if (MultiplierCalculator.personal(rank, bottle) > type.maxTenths() || global > type.maxTenths()
+                    || clanTenths > type.maxTenths()) {
                 msg.sendLine(sender, type, msg.raw("check.capped"), "max", msg.multiplier(type.maxTenths()));
             }
         }
@@ -502,7 +522,12 @@ public final class BoxCoreCommand implements TabExecutor {
                 case 3 -> filter(types, args[2]);
                 case 4 -> filter(multipliers(args[2]), args[3]);
                 case 5 -> filter(DURATIONS, args[4]);
-                case 6 -> filter(AMOUNTS, args[5]);
+                case 6 -> {
+                    List<String> options = new ArrayList<>(AMOUNTS);
+                    options.add(CLAN);
+                    yield filter(options, args[5]);
+                }
+                case 7 -> args[5].equalsIgnoreCase(CLAN) ? List.of() : filter(List.of(CLAN), args[6]);
                 default -> List.of();
             };
             case "global" -> {

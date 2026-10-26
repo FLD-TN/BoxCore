@@ -10,16 +10,20 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * In-memory global and personal boosts (§5, §6, §8). Holds only active boosts, for online and offline
- * players alike, because expiry is real time. Main thread only.
+ * In-memory global, personal and clan boosts (§5, §6, §8, Update 05 E3). Holds only active boosts, for online and
+ * offline players alike, because expiry is real time. Main thread only.
  */
 public final class BoostRegistry {
 
     private final Map<String, GlobalBoost> globals = new LinkedHashMap<>();
     private final Map<UUID, List<PersonalBoost>> personal = new HashMap<>();
+    /** clan → type → boost (at most one per clan and type). */
+    private final Map<UUID, Map<String, ClanBoost>> clans = new HashMap<>();
     private Runnable onChange = () -> {};
     /** Earliest personal expiry instant, lets the tick skip the scan when nothing can have expired. */
     private long nextPersonalExpiry = Long.MAX_VALUE;
+    /** Same for clan boosts. */
+    private long nextClanExpiry = Long.MAX_VALUE;
 
     /** Called after every change (used to mark storage dirty). */
     public void onChange(Runnable onChange) {
@@ -84,6 +88,46 @@ public final class BoostRegistry {
         return Collections.unmodifiableMap(personal);
     }
 
+    // ------------------------------------------------------------------ clan (Update 05 E3)
+
+    /** The clan's boost of a type, {@code null} if none (may be expired until the next tick). */
+    public ClanBoost clan(UUID clan, String type) {
+        if (clan == null) return null;
+        Map<String, ClanBoost> byType = clans.get(clan);
+        return byType == null ? null : byType.get(type);
+    }
+
+    /** Starts, extends or replaces the clan's boost of its type. @return the previous boost, or {@code null} */
+    public ClanBoost putClan(ClanBoost boost) {
+        ClanBoost old = clans.computeIfAbsent(boost.clan(), k -> new LinkedHashMap<>(2)).put(boost.type(), boost);
+        nextClanExpiry = Math.min(nextClanExpiry, boost.expiresAt());
+        onChange.run();
+        return old;
+    }
+
+    /** @return the removed boost, or {@code null} if none */
+    public ClanBoost removeClan(UUID clan, String type) {
+        Map<String, ClanBoost> byType = clans.get(clan);
+        if (byType == null) return null;
+        ClanBoost old = byType.remove(type);
+        if (byType.isEmpty()) clans.remove(clan);
+        if (old != null) onChange.run();
+        return old;
+    }
+
+    /** Removes every boost of a clan (disbanded). @return true if there was any */
+    public boolean removeClan(UUID clan) {
+        Map<String, ClanBoost> removed = clans.remove(clan);
+        if (removed == null) return false;
+        onChange.run();
+        return true;
+    }
+
+    /** Read-only view of all clan boosts, for storage snapshots. */
+    public Map<UUID, Map<String, ClanBoost>> allClans() {
+        return Collections.unmodifiableMap(clans);
+    }
+
     // ------------------------------------------------------------------ expiry
 
     /** Removes expired global boosts. @return the removed boosts, empty if none */
@@ -126,7 +170,41 @@ public final class BoostRegistry {
         return expired;
     }
 
+    /** Removes expired clan boosts. @return the removed boosts, empty if none */
+    public List<ClanBoost> expireClans(long now) {
+        if (now < nextClanExpiry) return List.of();
+        List<ClanBoost> expired = new ArrayList<>(1);
+        long next = Long.MAX_VALUE;
+        for (Iterator<Map<String, ClanBoost>> it = clans.values().iterator(); it.hasNext(); ) {
+            Map<String, ClanBoost> byType = it.next();
+            for (Iterator<ClanBoost> bi = byType.values().iterator(); bi.hasNext(); ) {
+                ClanBoost b = bi.next();
+                if (b.isExpired(now)) {
+                    bi.remove();
+                    expired.add(b);
+                } else {
+                    next = Math.min(next, b.expiresAt());
+                }
+            }
+            if (byType.isEmpty()) it.remove();
+        }
+        nextClanExpiry = next;
+        if (!expired.isEmpty()) onChange.run();
+        return expired;
+    }
+
     // ------------------------------------------------------------------ storage
+
+    /** Replaces the clan boosts with loaded data (startup only). Does not fire the change callback. */
+    public void loadClans(List<ClanBoost> loaded) {
+        clans.clear();
+        long next = Long.MAX_VALUE;
+        for (ClanBoost b : loaded) {
+            clans.computeIfAbsent(b.clan(), k -> new LinkedHashMap<>(2)).put(b.type(), b);
+            next = Math.min(next, b.expiresAt());
+        }
+        nextClanExpiry = next;
+    }
 
     /**
      * Replaces the whole content with loaded data (startup only). Does not fire the change callback.

@@ -7,7 +7,9 @@ plugins {
 // so consumers built against 1.0.0 need no change.
 // 1.2.0 (BoxCore 1.4.0) adds BoostService#getMultiplierTenths / #getMultiplierExact (default methods) and
 // Multipliers; existing signatures are unchanged. getMultiplier returns the whole part of a decimal multiplier.
-version = "1.2.0"
+// 1.3.0 (BoxCore 1.5.0) adds clan boosts: ClanProvider, ClanBoostResult, ActiveBoost, BottleInfo and default
+// methods on BoostService; existing signatures are unchanged.
+version = "1.3.0"
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")

@@ -1,6 +1,7 @@
 package com.dex.boxcore.display;
 
 import com.dex.boxcore.boost.BoostRegistry;
+import com.dex.boxcore.boost.ClanBoost;
 import com.dex.boxcore.boost.EffectiveCache;
 import com.dex.boxcore.boost.GlobalBoost;
 import com.dex.boxcore.boost.MultiplierCalculator;
@@ -24,8 +25,9 @@ import java.util.regex.Pattern;
 
 /**
  * Bossbars (§7.2): one shared bar per active global type, and per player at most one bar per type for the
- * highest active personal boost. Keeps no {@link Player} references; bars are keyed by type and UUID.
- * Main thread only.
+ * highest active personal boost, plus one per type for the boost of the player's clan (Update 05 E3.5; per player,
+ * because the "đang dùng" suffix depends on the player). Keeps no {@link Player} references; bars are keyed by type
+ * and UUID. Main thread only.
  *
  * <p>A title is parsed (placeholders, small caps, MiniMessage) only when what it shows changes; the remaining time,
  * which changes every second, is a marker in the parsed title that {@link #withRemaining} replaces with plain text
@@ -57,6 +59,7 @@ public final class BossBarService {
         int effective;
         int rank;
         int global;
+        int clan;
         /** Parsed title with the {@link #REMAINING} marker, {@code null} when it must be rebuilt. */
         Component base;
         /** Remaining time last shown. */
@@ -67,14 +70,39 @@ public final class BossBarService {
         }
 
         /** @return true if anything shown in the title changed */
-        boolean set(PersonalBoost boost, int effective, int rank, int global) {
-            if (boost.equals(this.boost) && effective == this.effective && rank == this.rank && global == this.global) {
+        boolean set(PersonalBoost boost, int effective, int rank, int global, int clan) {
+            if (boost.equals(this.boost) && effective == this.effective && rank == this.rank && global == this.global
+                    && clan == this.clan) {
                 return false;
             }
             this.boost = boost;
             this.effective = effective;
             this.rank = rank;
             this.global = global;
+            this.clan = clan;
+            this.base = null;
+            return true;
+        }
+    }
+
+    private static final class ClanBar {
+        final BossBar bar;
+        ClanBoost boost;
+        int effective;
+        /** Parsed title with the {@link #REMAINING} marker, {@code null} when it must be rebuilt. */
+        Component base;
+        /** Remaining time last shown. */
+        String remaining;
+
+        ClanBar(BossBar bar) {
+            this.bar = bar;
+        }
+
+        /** @return true if anything shown in the title changed */
+        boolean set(ClanBoost boost, int effective) {
+            if (boost.equals(this.boost) && effective == this.effective) return false;
+            this.boost = boost;
+            this.effective = effective;
             this.base = null;
             return true;
         }
@@ -84,6 +112,7 @@ public final class BossBarService {
     private final Supplier<Messages> messages;
     private final Map<String, GlobalBar> globalBars = new HashMap<>();
     private final Map<UUID, Map<String, PersonalBar>> personalBars = new HashMap<>();
+    private final Map<UUID, Map<String, ClanBar>> clanBars = new HashMap<>();
 
     public BossBarService(Supplier<CoreConfig> config, Supplier<Messages> messages) {
         this.config = config;
@@ -139,8 +168,13 @@ public final class BossBarService {
 
     // ------------------------------------------------------------------ personal
 
-    /** Rebuilds a player's personal bars from the registry and their effective multipliers. */
+    /** Rebuilds a player's personal and clan bars from the registry and their effective multipliers. */
     public void updatePlayer(Player player, EffectiveCache.Snapshot snapshot, BoostRegistry registry, long now) {
+        updatePersonalBars(player, snapshot, registry, now);
+        updateClanBars(player, snapshot, registry, now);
+    }
+
+    private void updatePersonalBars(Player player, EffectiveCache.Snapshot snapshot, BoostRegistry registry, long now) {
         CoreConfig cfg = config.get();
         UUID id = player.getUniqueId();
         List<PersonalBoost> personal = registry.personal(id);
@@ -166,6 +200,7 @@ public final class BossBarService {
             int effective = snapshot == null ? shown.tenths() : snapshot.effective(type.id());
             int rank = snapshot == null ? 0 : snapshot.rank(type.id());
             int global = snapshot == null ? 0 : snapshot.global(type.id());
+            int clan = snapshot == null ? 0 : snapshot.clan(type.id());
             if (bars == null) {
                 bars = new HashMap<>(4);
                 personalBars.put(id, bars);
@@ -173,11 +208,11 @@ public final class BossBarService {
             PersonalBar pb = bars.get(type.id());
             if (pb == null) {
                 pb = new PersonalBar(newBar(type));
-                pb.set(shown, effective, rank, global);
+                pb.set(shown, effective, rank, global, clan);
                 updatePersonal(pb, type, now);
                 bars.put(type.id(), pb);
                 player.showBossBar(pb.bar);
-            } else if (pb.set(shown, effective, rank, global)) {
+            } else if (pb.set(shown, effective, rank, global, clan)) {
                 updatePersonal(pb, type, now);
             }
         }
@@ -186,7 +221,7 @@ public final class BossBarService {
 
     private void updatePersonal(PersonalBar pb, BoostType type, long now) {
         if (pb.base == null) {
-            pb.base = personalTitle(messages.get(), type, pb.boost.tenths(), pb.effective, pb.rank, pb.global);
+            pb.base = personalTitle(messages.get(), type, pb.boost.tenths(), pb.effective, pb.rank, pb.global, pb.clan);
             pb.remaining = null;
         }
         String remaining = DurationFormat.clock(DurationFormat.remainingSeconds(pb.boost.expiresAt(), now));
@@ -198,18 +233,92 @@ public final class BossBarService {
 
     /** The parsed personal title with the {@link #REMAINING} marker (rebuilt only when the shown state changes). */
     static Component personalTitle(Messages msg, BoostType type, int tenths, int effective, int rank, int global) {
+        return personalTitle(msg, type, tenths, effective, rank, global, 0);
+    }
+
+    /** {@link #personalTitle(Messages, BoostType, int, int, int, int)} with the clan boost (Update 05). */
+    static Component personalTitle(Messages msg, BoostType type, int tenths, int effective, int rank, int global,
+                                   int clan) {
         String title = Messages.fill(msg.raw("bossbar.personal"),
                 "type", type.id(),
                 "type_name", type.displayName(),
                 "multiplier", msg.multiplier(tenths),
                 "remaining", REMAINING,
                 "effective", msg.multiplier(effective));
-        // U3: "đang dùng" when the global boost determines the value, "tổng" when stacked with a rank
-        if (MultiplierCalculator.globalWins(rank, tenths, global)) {
+        // U3: "đang dùng" when the global (or, Update 05, the clan) boost determines the value, "tổng" when stacked
+        // with a rank
+        if (MultiplierCalculator.externalWins(rank, tenths, global, clan)) {
             title = title + Messages.fill(msg.raw("bossbar.personal-suffix"), "effective", msg.multiplier(effective));
         } else if (rank > 0) {
             title = title + Messages.fill(msg.raw("bossbar.personal-suffix-total"), "effective",
                     msg.multiplier(effective));
+        }
+        return msg.parseStyled(type, title);
+    }
+
+    // ------------------------------------------------------------------ clan (Update 05 E3.5)
+
+    private void updateClanBars(Player player, EffectiveCache.Snapshot snapshot, BoostRegistry registry, long now) {
+        CoreConfig cfg = config.get();
+        UUID id = player.getUniqueId();
+        UUID clan = snapshot == null ? null : snapshot.clan();
+        Map<String, ClanBar> bars = clanBars.get(id);
+        if (bars != null) {
+            for (Iterator<Map.Entry<String, ClanBar>> it = bars.entrySet().iterator(); it.hasNext(); ) {
+                Map.Entry<String, ClanBar> e = it.next();
+                ClanBoost running = registry.clan(clan, e.getKey());
+                if (cfg.type(e.getKey()) == null || running == null || running.isExpired(now)) {
+                    player.hideBossBar(e.getValue().bar);
+                    it.remove();
+                }
+            }
+        }
+        if (clan != null) {
+            for (BoostType type : cfg.typeList()) {
+                ClanBoost running = registry.clan(clan, type.id());
+                if (running == null || running.isExpired(now)) continue;
+                int effective = snapshot.effective(type.id());
+                if (bars == null) {
+                    bars = new HashMap<>(4);
+                    clanBars.put(id, bars);
+                }
+                ClanBar cb = bars.get(type.id());
+                if (cb == null) {
+                    cb = new ClanBar(newBar(type));
+                    cb.set(running, effective);
+                    updateClan(cb, type, now);
+                    bars.put(type.id(), cb);
+                    player.showBossBar(cb.bar);
+                } else if (cb.set(running, effective)) {
+                    updateClan(cb, type, now);
+                }
+            }
+        }
+        if (bars != null && bars.isEmpty()) clanBars.remove(id);
+    }
+
+    private void updateClan(ClanBar cb, BoostType type, long now) {
+        if (cb.base == null) {
+            cb.base = clanTitle(messages.get(), type, cb.boost.tenths(), cb.effective);
+            cb.remaining = null;
+        }
+        String remaining = DurationFormat.clock(DurationFormat.remainingSeconds(cb.boost.expiresAt(), now));
+        if (remaining.equals(cb.remaining)) return;
+        cb.remaining = remaining;
+        cb.bar.name(withRemaining(cb.base, remaining));
+        cb.bar.progress(cb.boost.progress(now));
+    }
+
+    /** The parsed clan title with the {@link #REMAINING} marker; "đang dùng" when the player's value is higher. */
+    static Component clanTitle(Messages msg, BoostType type, int tenths, int effective) {
+        String title = Messages.fill(msg.raw("bossbar.clan"),
+                "type", type.id(),
+                "type_name", type.displayName(),
+                "multiplier", msg.multiplier(tenths),
+                "remaining", REMAINING,
+                "effective", msg.multiplier(effective));
+        if (effective > tenths) {
+            title = title + Messages.fill(msg.raw("bossbar.clan-suffix"), "effective", msg.multiplier(effective));
         }
         return msg.parseStyled(type, title);
     }
@@ -234,6 +343,12 @@ public final class BossBarService {
                 if (type != null) updatePersonal(e.getValue(), type, now);
             }
         }
+        for (Map<String, ClanBar> bars : clanBars.values()) {
+            for (Map.Entry<String, ClanBar> e : bars.entrySet()) {
+                BoostType type = cfg.type(e.getKey());
+                if (type != null) updateClan(e.getValue(), type, now);
+            }
+        }
     }
 
     /** Shows the active global bars to a joining player. */
@@ -248,6 +363,10 @@ public final class BossBarService {
         if (bars != null) {
             for (PersonalBar pb : bars.values()) player.hideBossBar(pb.bar);
         }
+        Map<String, ClanBar> clan = clanBars.remove(player.getUniqueId());
+        if (clan != null) {
+            for (ClanBar cb : clan.values()) player.hideBossBar(cb.bar);
+        }
     }
 
     /** Hides and discards all bars (reload, disable). */
@@ -260,6 +379,12 @@ public final class BossBarService {
             for (PersonalBar pb : e.getValue().values()) player.hideBossBar(pb.bar);
         }
         personalBars.clear();
+        for (Map.Entry<UUID, Map<String, ClanBar>> e : clanBars.entrySet()) {
+            Player player = Bukkit.getPlayer(e.getKey());
+            if (player == null) continue;
+            for (ClanBar cb : e.getValue().values()) player.hideBossBar(cb.bar);
+        }
+        clanBars.clear();
     }
 
     private static BossBar newBar(BoostType type) {

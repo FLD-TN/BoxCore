@@ -1,4 +1,4 @@
-# BoxCore — Integration Guide (BoxCore 1.4.0, API 1.2.0)
+# BoxCore — Integration Guide (BoxCore 1.5.0, API 1.3.0)
 
 This is the only document you need to integrate a plugin with BoxCore. Do not modify BoxCore; use the API below.
 
@@ -7,6 +7,8 @@ BoxCore 1.1.0 changed how the multiplier is computed on the server side, but the
 BoxCore 1.3.0 adds the **GEM** currency and API `com.dex:boxcore-api:1.1.0`, which only **adds** `GemService` and `GemResult` (§10). `BoostService` and `BoostTypes` are unchanged: plugins built against `boxcore-api-1.0.0` need no change and no rebuild. Use 1.1.0 only if you need gems.
 
 BoxCore 1.4.0 (API `com.dex:boxcore-api:1.2.0`) allows **decimal multipliers** (one decimal, e.g. x1.5) for the types declared with `decimal: true` in BoxCore's `config.yml` (by default only `quest`; `mining` stays whole). The API only **adds** default methods (`getMultiplierTenths`, `getMultiplierExact`) and the helper class `Multipliers` (§11). `getMultiplier` keeps its signature and returns the **whole part** (x1.5 → 1), so a plugin built against an older API never gives more than the boost; it only misses the decimal part. A plugin whose type is whole (`mining`) needs no change.
+
+BoxCore 1.5.0 (API `com.dex:boxcore-api:1.3.0`) adds **clan boosts** (§12). The API only **adds** types and default methods; a plugin that only reads multipliers needs no change, the clan boost is already in `getMultiplier`.
 
 ## 1. What BoxCore does
 
@@ -372,3 +374,50 @@ public static int multiplierTenths(UUID player, String type) {
 ```
 
 Rank permission of a decimal type: `boxcore.boost.<type>.<whole>_<digit>` (`boxcore.boost.quest.1_5` = x1.5); a dot cannot be used because it separates the permission node.
+
+## 12. Clan boosts (API 1.3.0, BoxCore 1.5.0)
+
+A clan boost applies to every member of a clan: `effective = min(max(rank + bottle, global, clan), cap)`. It never adds
+up with anything, it counts down in real time (members online or not), and `getMultiplier` already includes it, so a
+plugin that only **reads** multipliers (CataMines, BoxQuest) needs no change.
+
+Only the clan plugin (BoxClans) talks to this part of the API. Every new method is a `default` method: implementations
+older than 1.3.0 answer "unavailable".
+
+```java
+BoostService boosts = Bukkit.getServicesManager().load(BoostService.class);
+boosts.registerClanProvider(plugin, new ClanProvider() {        // once, on enable; removed when plugin is disabled
+    public UUID clanOf(UUID player) { ... }                     // null = no clan
+    public boolean canUseClanBoost(UUID player) { ... }         // Minh Chủ / Phó Bang
+    public String clanName(UUID clan) { ... }                   // legacy § text
+    public Collection<UUID> onlineMembers(UUID clan) { ... }
+});
+boosts.refreshClanOf(player);   // after join / leave / kick: the multiplier changes at once (any thread)
+boosts.clearClan(clan);         // clan disbanded: its boosts are deleted (any thread)
+```
+
+Starting a boost (main thread only; no permission check, the caller decides):
+
+```java
+ClanBoostResult r = boosts.startClanBoost(clan, "mining", 20, 3600, false, player.getName());
+switch (r.status()) {
+    case STARTED, EXTENDED, REPLACED -> { /* done, the online members were told; consume the bottle */ }
+    case CONFIRM_REPLACE, CONFIRM_CAPPED -> { /* ask the player, then call again with confirmed = true */ }
+    case LOWER, FULL, INVALID, UNAVAILABLE -> { /* refused, keep the bottle */ }
+}
+```
+
+| Running boost of the type | New boost | Result |
+|---|---|---|
+| none (or expired) | any | `STARTED` |
+| same multiplier | any duration | `EXTENDED`: the duration is added, up to `max-duration`. If some would be cut: `CONFIRM_CAPPED` first (`lostSeconds`); already at `max-duration`: `FULL` |
+| lower multiplier | higher | `CONFIRM_REPLACE` (`lostSeconds` = remaining time of the old one), then `REPLACED` |
+| higher multiplier | lower | `LOWER` |
+
+Other calls: `stopClanBoost(clan, type)`, `clanBoost(clan, type)` → `Optional<ActiveBoost>`, and
+`readBottle(item)` → `Optional<BottleInfo>` (type, tenths, duration, `clan()` true for a clan bottle) to recognise
+BoxCore bottles, e.g. in a clan storage.
+
+Every change of a clan boost fires `com.dex.boxcore.api.event.ClanBoostEvent` on the main thread after it happened
+(`action()`: `STARTED`, `EXTENDED`, `REPLACED`, `STOPPED`, `EXPIRED`; `clan()`, `type()`, `tenths()`, `oldTenths()`,
+`expiresAt()`, `addedSeconds()`, `actor()` = player name or `null`), whatever caused it: a bottle in hand, the API, the tick.

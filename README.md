@@ -23,8 +23,8 @@ Kết quả:
 
 | File | Dùng cho |
 |---|---|
-| `boxcore-plugin/build/libs/BoxCore-1.4.0.jar` | bỏ vào `plugins/` của server (đã chứa API, không relocate) |
-| `boxcore-api/build/libs/boxcore-api-1.2.0.jar` | cho plugin khác compile (`provided` / `compileOnly`); 1.2.0 chỉ thêm `getMultiplierTenths` và `Multipliers`, plugin build với 1.0.0 / 1.1.0 vẫn chạy |
+| `boxcore-plugin/build/libs/BoxCore-1.5.0.jar` | bỏ vào `plugins/` của server (đã chứa API, không relocate) |
+| `boxcore-api/build/libs/boxcore-api-1.3.0.jar` | cho plugin khác compile (`provided` / `compileOnly`); 1.3.0 chỉ thêm API boost bang hội, plugin build với API cũ vẫn chạy |
 
 Plugin test tích hợp (chỉ compile với API qua `mavenLocal()`): `examples/boxcore-test-plugin` — chạy `../../gradlew build` trong thư mục đó, lệnh trong game `/boxcoretest [player]`.
 
@@ -33,7 +33,7 @@ Plugin test tích hợp (chỉ compile với API qua `mavenLocal()`): `examples/
 | Lệnh | Quyền |
 |---|---|
 | `/booster` | `boxcore.use` (mặc định true) |
-| `/boxcore give <player> <type> <multiplier> <duration> [amount]` | `boxcore.admin` |
+| `/boxcore give <player> <type> <multiplier> <duration> [amount] [clan]` | `boxcore.admin` (`clan` = chai bang hội) |
 | `/boxcore global start <type> <multiplier> <duration>` | `boxcore.admin` |
 | `/boxcore global stop <type>` | `boxcore.admin` |
 | `/boxcore reload` | `boxcore.admin` |
@@ -56,6 +56,8 @@ Placeholder:
 |---|---|
 | `%boxcore_multiple_<type>%` | bội số boost hiệu lực (`2`, `1.5`; dấu thập phân theo `multiplier-decimal-separator`) |
 | `%boxcore_multiple_<type>_raw%` | như trên nhưng luôn dùng dấu chấm, cho plugin cần đọc số |
+| `%boxcore_clan_<type>%` | hệ số boost bang hội của người chơi (`1` nếu không có) |
+| `%boxcore_clan_<type>_remaining%` | thời gian còn lại của boost bang hội (rỗng nếu không có) |
 | `%boxcore_gem%` | số dư Gem, số thô (`1250`) |
 | `%boxcore_gem_formatted%` | `1.250` |
 | `%boxcore_gem_short%` | `1,2K`, `3,4M` |
@@ -65,7 +67,7 @@ Placeholder:
 ## File dữ liệu (`plugins/BoxCore/`)
 
 - `config.yml`, `messages.yml` — cấu hình và toàn bộ text (tiếng Việt, small caps bật mặc định). Có khóa `config-version: 2`; file của bản 1.0.0 (không có khóa này) được tự động sao lưu thành `*.1.0.0.bak` và thay bằng mặc định mới khi khởi động.
-- `global-boosts.yml`, `player-boosts.yml` — boost đang chạy, lưu theo thời điểm hết hạn tuyệt đối (giờ thực). File hỏng sẽ được đổi tên thành `*.broken-<timestamp>`.
+- `global-boosts.yml`, `player-boosts.yml`, `clan-boosts.yml` — boost đang chạy, lưu theo thời điểm hết hạn tuyệt đối (giờ thực). File hỏng sẽ được đổi tên thành `*.broken-<timestamp>`.
 - `gems.db` (SQLite) — số dư Gem (`gem_balances`) và sổ giao dịch (`gem_transactions`, xóa bản ghi cũ hơn `gem.log-keep-days`). Sao lưu khi server tắt, hoặc chép kèm `gems.db-wal` và `gems.db-shm`. File hỏng **không** bao giờ bị xóa: Gem tạm tắt, boost vẫn chạy. Server nâng cấp từ 1.1.0 không cần sửa `config.yml`: thiếu mục `gem` thì dùng mặc định.
 
 ## Nâng cấp lên 1.4.0 (bội số lẻ)
@@ -75,3 +77,21 @@ Placeholder:
 - Chai và file boost cũ dùng tiếp được; chai nguyên của 1.3.0 và 1.4.0 vẫn gộp chồng.
 - Hạ cấp về 1.3.0: chai lẻ (x1.5) không dùng được, boost lẻ đang chạy bị bỏ khi nạp file.
 - Tắt `decimal` của một loại khi đang có boost lẻ chạy: hệ số hiệu lực bỏ phần lẻ (x2.5 thành x2), chai lẻ còn trong túi không dùng được (không bị mất).
+
+## Nâng cấp lên 1.5.0 (boost bang hội, chai mới)
+
+- **Chai mới:** mining là chai mật ong (`HONEY_BOTTLE`), quest là chai nước (`POTION`), đổi được bằng
+  `types.<loại>.bottle-material`. `config.yml` cũ không có khoá này vẫn dùng đúng 2 chất liệu trên. Chai mới stack
+  được 64. Chai kinh nghiệm cũ vẫn dùng được. Chai không uống, không chế tạo, không bỏ vào lò thuốc được.
+- **Chữ trên chai** không còn small caps hay in đậm. `messages.yml` cũ: tên / lore chai và `/booster` còn đúng chữ
+  mặc định 1.4.0 thì tự dùng chữ mới; chữ đã sửa tay được giữ. Tin nhắn mới thiếu trong file thì lấy bản mặc định (1
+  dòng thông tin khi khởi động).
+- **Chai cá nhân:** cùng hệ số với chai đang chạy thì **cộng thêm thời gian** (tối đa `max-duration`, bị cắt thì hỏi
+  xác nhận); hệ số thấp hơn thì **từ chối, giữ chai**; cao hơn vẫn thay thế sau khi xác nhận.
+- **Boost bang hội** (cần BoxClans 1.3.0 trở lên): `/boxcore give <người> <loại> <hệ số> <thời gian> [số lượng] clan`
+  tạo chai bang hội, chỉ Minh Chủ / Phó Bang dùng được. Hệ số = cao nhất giữa (rank + chai), global, bang hội. Bossbar
+  riêng, `/boxcore check` có dòng "Bang hội", file `clan-boosts.yml`. Không có BoxClans: chai bang hội báo lỗi, không mất.
+- **Tin nhắn gem:** số gem và chữ "Gem" cùng màu tím của gem (`<gem>`, `gem.color` trong `config.yml`), ví dụ
+  "Bạn nhận được 1.250 Gem". `messages.yml` cũ còn đúng chữ mặc định thì tự dùng chữ mới; dòng đã sửa tay được giữ.
+- Placeholder mới: `%boxcore_clan_<loại>%` (hệ số bang hội, `1` nếu không có), `%boxcore_clan_<loại>_remaining%`.
+- API `boxcore-api-1.3.0`: chỉ thêm (mục 12 của `INTEGRATION.md`); plugin build với API cũ chạy bình thường.

@@ -9,8 +9,9 @@ config-version: 2
 # Symbols: ✔ (success), ✘ (error), • (bullet), › (prefix), (!) — quantities are written x10
 # One line per message, no exclamation marks, no trailing full stops
 # A message set to '' is not sent
-# Chat messages use the normal font. Small caps (config.yml style.small-caps) only applies to
-# bottle-item and bossbar texts; tags are never converted
+# Chat messages and bottles use the normal font. Small caps (config.yml style.small-caps) only applies to
+# bossbar titles; tags are never converted
+# Item lore: short lines (about 30 characters), long sentences go on the next line
 # Colours are MiniMessage: <dark_gray>, <#33FD42>, <bold>... (legacy & codes are NOT supported)
 
 # Prepended to every chat message, '' removes it
@@ -32,16 +33,20 @@ bottle:
   used: '<success>✔ Đã kích hoạt <type>Boost %type_name% x%multiplier% <muted>trong <text>%duration%'
   # the active bottle of the same type was deleted (its remaining time is lost). %old% %remaining% %multiplier%
   replaced: '<muted>Boost <type>%type_name% x%old%<muted> cũ (còn <text>%remaining%<muted>) đã được thay bằng <type>x%multiplier%'
+  # same multiplier as the running bottle: its duration was added (Update 05). %added% %remaining% %multiplier%
+  extended: '<success>Đã cộng thêm <text>%added% <success>vào <type>Boost %type_name% x%multiplier%<muted>, còn <text>%remaining%'
+  # same multiplier but the running bottle is already at max-duration: refused, the bottle is kept. %max%
+  full: '<error>Boost <type>%type_name% x%multiplier% <error>đã đạt thời gian tối đa <text>%max%<error>, chưa cộng thêm được'
+  # lower multiplier than the running bottle: refused, the bottle is kept. %old% %remaining%
+  refused-lower: '<error>Bạn đang dùng <type>Boost %type_name% x%old%<error>, chai x%multiplier% thấp hơn nên không dùng được'
   # Warnings: the bottle is only used if used again within %seconds% seconds (config.yml bottle.confirm-window-seconds)
   # Placeholders: %type_name% %multiplier% %duration% (this bottle), %old% (active bottle), %remaining% (its time left),
   #               %effective% (current multiplier), %after% (multiplier if this bottle were used now), %seconds%
-  # same multiplier as the active bottle: replaces it, its remaining time is lost
-  confirm-same: '<accent>(!) Bạn đang dùng <type>Boost %type_name% x%old% <muted>(còn <text>%remaining%<muted>)<accent>. Dùng chai cùng hệ số sẽ thay thế chai cũ và mất thời gian còn lại. <muted>Sử dụng lại trong <text>%seconds% giây <muted>để xác nhận'
+  # same multiplier, the added time would go past max-duration: %lost% is dropped. %max% %lost%
+  confirm-capped: '<accent>(!) Boost <type>%type_name% x%multiplier% <accent>chỉ cộng được tới tối đa <text>%max%<accent>, phần dư <text>%lost% <accent>sẽ mất. <muted>Sử dụng lại trong <text>%seconds% giây <muted>để xác nhận'
   # higher multiplier than the active bottle: replaces it, its remaining time is lost
   confirm-higher: '<accent>(!) Chai <type>x%multiplier% <accent>sẽ thay thế <type>Boost %type_name% x%old% <muted>(còn <text>%remaining%<muted>)<accent>, thời gian còn lại của chai cũ sẽ mất. <muted>Sử dụng lại trong <text>%seconds% giây <muted>để xác nhận'
-  # lower multiplier than the active bottle: consumed without effect, the active bottle is kept
-  confirm-lower: '<error>✘ Bạn đang dùng <type>Boost %type_name% x%old%<error>, chai x%multiplier% thấp hơn nên sẽ vô tác dụng. <muted>Sử dụng lại trong <text>%seconds% giây <muted>nếu vẫn muốn dùng'
-  # no active bottle, but the rank or global boost is already as high: consumed without effect
+  # no active bottle, but the rank, global or clan boost is already as high: consumed without effect
   confirm-no-effect: '<error>✘ Boost hiện tại của bạn là <text>x%effective%<error>, nếu sử dụng boost này bây giờ sẽ vô tác dụng. <muted>Sử dụng lại trong <text>%seconds% giây <muted>nếu vẫn muốn dùng'
   used-no-effect: '<muted>Đã sử dụng Boost %type_name% x%multiplier%, boost không có tác dụng'
   invalid: '<error>✘ Chai boost này không còn hợp lệ, hãy liên hệ quản trị viên'
@@ -54,7 +59,7 @@ bottle:
 # Bottle item. Placeholders: %type% %type_name% %multiplier% %duration% %description% %click%
 # Name and lore are display only, the plugin never reads them back
 bottle-item:
-  name: '<type><bold>Boost %type_name%</bold> <dark_gray>[<#FFD166>x%multiplier%<dark_gray>]'
+  name: '<type>Boost %type_name% <dark_gray>[<#FFD166>x%multiplier%<dark_gray>]'
   lore:
     - '<#BFC7D5>%description%'
     - ''
@@ -63,13 +68,59 @@ bottle-item:
     - '<gray>• Hệ số: <#FFD166>x%multiplier%'
     - '<gray>• Thời gian: <#7CFC9A>%duration%'
     - ''
+    - '<#FFD166>Lưu ý:'
+    - '<gray>• Cùng hệ số: cộng thời gian'
+    - '<gray>• Hệ số thấp hơn: không dùng được'
     - '<gray>• Hướng dẫn: <#7FDBFF>/booster'
     - ''
+    - '<dark_gray>[<#7CFC9A>%click% để kích hoạt<dark_gray>]'
+
+# Clan bottle (Update 05): /boxcore give <player> <type> <multiplier> <duration> [amount] clan
+# Only the Minh Chủ and the Phó Bang of a clan can use it; it boosts every member of their clan
+clan-bottle-item:
+  name: '<type>Boost %type_name% - Bang hội <dark_gray>[<#FFD166>x%multiplier%<dark_gray>]'
+  lore:
+    - '<#BFC7D5>%description%'
+    - '<#BFC7D5>cho cả bang hội'
+    - ''
+    - '<#FFD166>Thông tin:'
+    - '<gray>• Hệ số: <#FFD166>x%multiplier%'
+    - '<gray>• Thời gian: <#7CFC9A>%duration%'
+    - '<gray>• Vẫn tính giờ khi offline'
+    - ''
+    - '<#FFD166>Lưu ý:'
+    - '<gray>• Không cộng với boost khác,'
+    - '<gray>  nhận hệ số cao nhất'
+    - '<gray>• Cùng hệ số: cộng thời gian'
+    - '<gray>• Hệ số thấp hơn: không dùng được'
+    - ''
+    - '<#FF8A8A>Chỉ Minh Chủ, Phó Bang dùng được'
     - '<dark_gray>[<#7CFC9A>%click% để kích hoạt<dark_gray>]'
 
 give:
   done: '<success>✔ Đã tặng <text>%amount% <type>Boost %type_name% x%multiplier% <muted>(%duration%) <success>cho <text>%player%'
   received: '<success>Bạn nhận được <text>%amount% <type>Boost %type_name% x%multiplier%'
+  done-clan: '<success>✔ Đã tặng <text>%amount% <type>Boost %type_name% - Bang hội x%multiplier% <muted>(%duration%) <success>cho <text>%player%'
+  received-clan: '<success>Bạn nhận được <text>%amount% <type>Boost %type_name% - Bang hội x%multiplier%'
+
+# Clan boosts (Update 05). Sent to every online member of the clan unless noted.
+# %player% who used it (staff-name for commands), %clan% the clan, %type_name% %multiplier% %duration%,
+# %added% time added, %remaining% time left, %old% the replaced multiplier
+clan:
+  staff-name: 'Quản trị viên'
+  started: '<accent>%player% <success>đã kích hoạt <type>Boost Bang hội %type_name% x%multiplier% <muted>trong <text>%duration%'
+  extended: '<accent>%player% <success>đã cộng thêm <text>%added% <success>vào <type>Boost Bang hội %type_name% x%multiplier%<muted>, còn <text>%remaining%'
+  replaced: '<accent>%player% <success>đã thay <type>Boost Bang hội %type_name% x%old% <success>bằng <type>x%multiplier% <muted>trong <text>%duration%'
+  expired: '<muted>Boost Bang hội <type>%type_name% x%multiplier% <muted>đã hết hạn'
+  stopped: '<muted>Boost Bang hội <type>%type_name% x%multiplier% <muted>đã bị dừng'
+  # to the player using the bottle only. Warnings: %seconds% %old% %remaining% %max% %lost%
+  confirm-replace: '<accent>(!) Chai <type>x%multiplier% <accent>sẽ thay <type>Boost Bang hội %type_name% x%old% <muted>(còn <text>%remaining%<muted>)<accent>, thời gian còn lại sẽ mất. <muted>Sử dụng lại trong <text>%seconds% giây <muted>để xác nhận'
+  confirm-capped: '<accent>(!) Boost Bang hội <type>%type_name% x%multiplier% <accent>chỉ cộng được tới tối đa <text>%max%<accent>, phần dư <text>%lost% <accent>sẽ mất. <muted>Sử dụng lại trong <text>%seconds% giây <muted>để xác nhận'
+  refused-lower: '<error>Bang hội đang có <type>Boost %type_name% x%old%<error>, chai x%multiplier% thấp hơn nên không dùng được'
+  full: '<error>Boost Bang hội <type>%type_name% x%multiplier% <error>đã đạt thời gian tối đa <text>%max%'
+  no-clan: '<error>Bạn chưa có bang hội nên không dùng được chai boost bang hội'
+  not-allowed: '<error>Chỉ Minh Chủ và Phó Bang được dùng chai boost bang hội'
+  unavailable: '<error>Boost bang hội chưa hoạt động trên server, hãy báo quản trị viên'
 
 global:
   started: '<accent>Boost toàn server <type>%type_name% x%multiplier% <accent>đã bắt đầu trong <text>%duration%'
@@ -106,6 +157,10 @@ bossbar:
   personal-suffix: ' <gray>| <muted>đang dùng <text>x%effective%'
   # appended when the bottle is stacked with a rank (and no higher global)
   personal-suffix-total: ' <gray>| <muted>tổng <text>x%effective%'
+  # boost of the player's clan (Update 05), shown to every online member
+  clan: '<bold><type>Boost Bang hội %type_name% x%multiplier%</bold> <gray>| <aqua>%remaining%'
+  # appended when the player's own value (rank + bottle, or global) is higher than the clan boost
+  clan-suffix: ' <gray>| <muted>đang dùng <text>x%effective%'
 
 # /boxcore check <player> (admin, no prefix). %time% uses config.yml timezone
 # rank = R (0 = none), bottle = B (0 = none), personal = max(R + B, 1), effective = min(max(personal, global, 1), max)
@@ -118,38 +173,42 @@ check:
   global-none: '<muted>  • Global: <text>không có'
   bottle: '<muted>  • Chai: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%)'
   bottle-none: '<muted>  • Chai: <text>không có'
+  clan: '<muted>  • Bang hội: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%)'
+  clan-used: '<muted>  • Bang hội: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%) → <accent>đang dùng bang hội'
+  clan-none: '<muted>  • Bang hội: <text>không có'
   capped: '<muted>  • Giới hạn tối đa <text>x%max%'
 
 # GEM currency. %gem% is the coloured gem name (config.yml gem.display-name and gem.color)
 # Amounts are written 1.250 (grouped with '.')
+# <gem> is the gem colour: amounts of gem use it too, so '1.250 Gem' is one colour
 gem:
-  balance: '<muted>Số dư: <text>%amount% %gem%'
+  balance: '<muted>Số dư: <gem>%amount% %gem%'
   # to the player on /boxcore gem give|take|set (not with -s)
-  received: '<success>Bạn nhận được <aqua>%amount% %gem%'
-  taken: '<muted>Đã trừ %amount% %gem% khỏi tài khoản của bạn'
-  set: '<muted>Số dư %gem% của bạn được đặt thành <text>%amount%'
+  received: '<success>Bạn nhận được <gem>%amount% %gem%'
+  taken: '<muted>Đã trừ <gem>%amount% %gem% <muted>khỏi tài khoản của bạn'
+  set: '<muted>Số dư của bạn được đặt thành <gem>%amount% %gem%'
   admin:
-    given: '<success>✔ Đã cộng <text>%amount% %gem% <success>cho <text>%player% <muted>(số dư %balance%)'
-    taken: '<success>✔ Đã trừ <text>%amount% %gem% <success>của <text>%player% <muted>(số dư %balance%)'
-    set: '<success>✔ Đã đặt số dư %gem% của <text>%player% <success>thành <text>%amount%'
-    insufficient: '<error>✘ <text>%player% <error>chỉ có <text>%balance% %gem%'
-    limit: '<error>✘ Số dư %gem% của <text>%player% <error>sẽ vượt quá tối đa <text>%max%'
+    given: '<success>✔ Đã cộng <gem>%amount% %gem% <success>cho <text>%player% <muted>(số dư <gem>%balance%<muted>)'
+    taken: '<success>✔ Đã trừ <gem>%amount% %gem% <success>của <text>%player% <muted>(số dư <gem>%balance%<muted>)'
+    set: '<success>✔ Đã đặt số dư của <text>%player% <success>thành <gem>%amount% %gem%'
+    insufficient: '<error>✘ <text>%player% <error>chỉ có <gem>%balance% %gem%'
+    limit: '<error>✘ Số dư của <text>%player% <error>sẽ vượt quá tối đa <gem>%max% %gem%'
     # /boxcore gem check <player> (no prefix). %time% uses config.yml timezone
-    check-header: '<accent>%gem% của %player% <muted>• <text>%balance%'
-    check-line: '<muted>%time% <text>%delta% <muted>→ %balance% • %reason%'
+    check-header: '<accent>%gem% của %player% <muted>• <gem>%balance% %gem%'
+    check-line: '<muted>%time% <gem>%delta% <muted>→ <gem>%balance% <muted>• %reason%'
     check-empty: '<muted>Chưa có giao dịch nào'
   pay:
-    sent: '<success>✔ Đã chuyển <text>%amount% %gem% <success>cho <text>%player%'
-    received: '<success>Bạn nhận được <aqua>%amount% %gem% <success>từ <text>%player%'
-    insufficient: '<error>✘ Bạn không đủ %gem%, số dư hiện tại: <text>%balance%'
+    sent: '<success>✔ Đã chuyển <gem>%amount% %gem% <success>cho <text>%player%'
+    received: '<success>Bạn nhận được <gem>%amount% %gem% <success>từ <text>%player%'
+    insufficient: '<error>✘ Bạn không đủ %gem%<error>, số dư hiện tại: <gem>%balance% %gem%'
     self: '<error>✘ Không thể tự chuyển cho chính mình'
-    min: '<error>✘ Số lượng tối thiểu là <text>%min%'
+    min: '<error>✘ Số lượng tối thiểu là <gem>%min% %gem%'
     cooldown: '<error>✘ Vui lòng đợi <text>%seconds% giây <error>trước khi chuyển tiếp'
     target-full: '<error>✘ <text>%player% <error>đã đạt số dư tối đa'
   # /gem top (no prefix)
   top:
     header: '<accent>Bảng xếp hạng %gem%'
-    line: '<muted>%rank%. <text>%player% <muted>• <text>%amount%'
+    line: '<muted>%rank%. <text>%player% <muted>• <gem>%amount% %gem%'
     updated: '<muted>Cập nhật %seconds% giây trước'
     empty: '<muted>Chưa có ai trong bảng xếp hạng'
     # %boxcore_gem_top_<n>_name% / _amount% when rank n is empty
@@ -171,8 +230,17 @@ booster:
     - '<gray>• <#FFAA00>Boost Mining <gray>tăng vật phẩm nhận được khi đào khối'
     - '<gray>• <#55FFFF>Boost Quest <gray>tăng phần thưởng nhiệm vụ <dark_gray>(/quest)'
     - '<gray>• Multiple rank <#7CFC9A>cộng dồn <gray>với booster cá nhân <dark_gray>(chỉ tính chai đang chạy)'
+    - '<gray>• Chai cùng hệ số với chai đang chạy: <#7CFC9A>cộng thêm thời gian <dark_gray>(có giới hạn tối đa)'
+    - '<gray>• Chai hệ số cao hơn: thay chai cũ, cần <#FFD166>dùng lại lần 2 <gray>để xác nhận'
+    - '<gray>• Chai hệ số thấp hơn: <#FF6B6B>không dùng được<gray>, chai được giữ lại'
     - '<gray>• Boost global <#FF6B6B>không cộng dồn <gray>với multiple rank và booster cá nhân'
-    - '<gray>• Dùng chai khi đang có boost cùng loại cần <#FFD166>dùng lại lần 2 <gray>để xác nhận'
+    - ''
+    - '<#FFD166><bold>Boost Bang hội</bold>'
+    - '<gray>• Chỉ <white>Minh Chủ <gray>và <white>Phó Bang <gray>dùng được chai bang hội'
+    - '<gray>• Áp dụng cho <white>mọi thành viên<gray>, vào bang là có, rời bang là mất'
+    - '<gray>• <#FF6B6B>Không cộng dồn <gray>với boost khác, mỗi người nhận hệ số cao nhất'
+    - '<gray>• Cùng hệ số: cộng thời gian; cao hơn: thay boost cũ; thấp hơn: không dùng được'
+    - ''
     - '<gray>• Thời gian tính theo <white>giờ thực<gray>, vẫn trôi khi bạn thoát game'
     - '<gray>• Boost đang chạy hiển thị trên <white>thanh bossbar'
     - ''

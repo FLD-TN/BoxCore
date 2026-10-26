@@ -6,6 +6,7 @@ import com.dex.boxcore.config.Messages;
 import com.dex.boxcore.gem.GemFormat;
 import com.dex.boxcore.gem.GemLedger;
 import com.dex.boxcore.gem.GemTop;
+import com.dex.boxcore.util.DurationFormat;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.OfflinePlayer;
 
@@ -14,7 +15,8 @@ import java.util.function.Supplier;
 
 /**
  * PlaceholderAPI expansion {@code boxcore} (§7.3, Update 03 §6, Update 04 D7): {@code %boxcore_multiple_<type>%},
- * {@code %boxcore_multiple_<type>_raw%} and the gem
+ * {@code %boxcore_multiple_<type>_raw%}, the clan boost ({@code %boxcore_clan_<type>%}, {@code _remaining}, Update 05)
+ * and the gem
  * placeholders. {@link #onRequest} may run on async threads, so it only reads the effective-multiplier cache,
  * the in-memory gem balances and the leaderboard snapshot; it never touches the database.
  */
@@ -22,6 +24,8 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
 
     private static final String MULTIPLE = "multiple_";
     private static final String RAW = "_raw";
+    private static final String CLAN = "clan_";
+    private static final String REMAINING = "_remaining";
     private static final String GEM = "gem";
     private static final String GEM_TOP = "gem_top_";
 
@@ -76,6 +80,13 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
                 return "1";
             }
         }
+        if (params.startsWith(CLAN)) {
+            try {
+                return clan(player, params.substring(CLAN.length()));
+            } catch (Throwable t) {
+                return "";
+            }
+        }
         if (params.startsWith(GEM)) {
             try {
                 return gem(player, params);
@@ -84,6 +95,23 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
             }
         }
         return null;
+    }
+
+    /**
+     * Update 05 E3.5: {@code clan_<type>} = multiplier of the player's clan boost ({@code 1} if none),
+     * {@code clan_<type>_remaining} = its remaining time ({@code ""} if none). Read from the cache snapshot, safe
+     * from any thread.
+     */
+    private String clan(OfflinePlayer player, String rest) {
+        boolean remaining = rest.endsWith(REMAINING);
+        String type = remaining ? rest.substring(0, rest.length() - REMAINING.length()) : rest;
+        EffectiveCache.Snapshot s = player == null ? null : cache.snapshot(player.getUniqueId());
+        long now = System.currentTimeMillis();
+        int tenths = s == null ? 0 : s.clan(type);
+        long expiresAt = s == null ? 0 : s.clanExpiresAt(type);
+        if (tenths == 0 || expiresAt <= now) return remaining ? "" : "1";
+        return remaining ? DurationFormat.clock(DurationFormat.remainingSeconds(expiresAt, now))
+                : messages.get().multiplier(tenths);
     }
 
     private String gem(OfflinePlayer player, String params) {

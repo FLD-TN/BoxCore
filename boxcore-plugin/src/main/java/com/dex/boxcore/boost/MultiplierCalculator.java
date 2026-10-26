@@ -9,10 +9,11 @@ import java.util.List;
  *
  * <pre>
  * personal  = max(R + B, 10)                    rank + active personal bottle
- * effective = min(max(personal, G, 10), maxTenths)
+ * effective = min(max(personal, G, C, 10), maxTenths)
  * </pre>
  *
- * The global boost {@code G} never adds up with rank or bottle; the cap applies to the final value.
+ * The global boost {@code G} and the clan boost {@code C} (Update 05 E3.1) never add up with anything; the cap
+ * applies to the final value.
  */
 public final class MultiplierCalculator {
 
@@ -32,7 +33,16 @@ public final class MultiplierCalculator {
      * @param maxTenths the type's cap
      */
     public static int effective(int rank, int bottle, int global, int maxTenths) {
-        int value = Math.max(Math.max(personal(rank, bottle), global), Multipliers.ONE);
+        return effective(rank, bottle, global, 0, maxTenths);
+    }
+
+    /**
+     * Effective multiplier with the clan boost (Update 05 E3.1), in tenths.
+     *
+     * @param clan the running boost of the player's clan C (0 if none)
+     */
+    public static int effective(int rank, int bottle, int global, int clan, int maxTenths) {
+        int value = Math.max(Math.max(Math.max(personal(rank, bottle), global), clan), Multipliers.ONE);
         return Math.max(Multipliers.ONE, Math.min(value, maxTenths));
     }
 
@@ -43,8 +53,13 @@ public final class MultiplierCalculator {
      * @param active the active bottle's multiplier (0 if none)
      */
     public static boolean isUseful(int rank, int active, int global, int m, int maxTenths) {
-        int current = effective(rank, active, global, maxTenths);
-        int after = effective(rank, m, global, maxTenths);
+        return isUseful(rank, active, global, 0, m, maxTenths);
+    }
+
+    /** {@link #isUseful(int, int, int, int, int)} with the clan boost {@code clan} (Update 05). */
+    public static boolean isUseful(int rank, int active, int global, int clan, int m, int maxTenths) {
+        int current = effective(rank, active, global, clan, maxTenths);
+        int after = effective(rank, m, global, clan, maxTenths);
         return after > current && m > active;
     }
 
@@ -61,6 +76,44 @@ public final class MultiplierCalculator {
     /** True when the global boost alone determines the value ({@code G > personal}). */
     public static boolean globalWins(int rank, int bottle, int global) {
         return global > personal(rank, bottle);
+    }
+
+    /** True when the global or the clan boost determines the value ({@code max(G, C) > personal}). */
+    public static boolean externalWins(int rank, int bottle, int global, int clan) {
+        return Math.max(global, clan) > personal(rank, bottle);
+    }
+
+    /** Multiplier of a clan's running boost, 0 if none or expired. */
+    public static int clan(ClanBoost boost, long now) {
+        return boost == null || boost.isExpired(now) ? 0 : boost.tenths();
+    }
+
+    /**
+     * Adding a boost of the same multiplier to a running one (Update 05 E3.3 and E5).
+     *
+     * @param expiresAt new expiry, at most {@code now + max-duration}
+     * @param lostMs    milliseconds of the new boost dropped by that limit
+     * @param full      true when the running boost is already (within a second) at {@code max-duration}: nothing
+     *                  can be added
+     */
+    public record Extension(long expiresAt, long lostMs, boolean full) {}
+
+    /**
+     * @param oldExpiresAt expiry of the running boost
+     * @param durationMs   duration of the new boost
+     * @param maxMs        the type's {@code max-duration}
+     */
+    public static Extension extend(long oldExpiresAt, long durationMs, long now, long maxMs) {
+        long cap = saturatedAdd(now, maxMs);
+        if (cap - oldExpiresAt < 1000L) return new Extension(oldExpiresAt, durationMs, true);
+        long wanted = saturatedAdd(oldExpiresAt, durationMs);
+        long expiresAt = Math.min(wanted, cap);
+        return new Extension(expiresAt, wanted - expiresAt, false);
+    }
+
+    private static long saturatedAdd(long a, long b) {
+        long r = a + b;
+        return ((a ^ r) & (b ^ r)) < 0 ? Long.MAX_VALUE : r;
     }
 
     /** Multiplier of an active global boost, 0 if none or expired. */

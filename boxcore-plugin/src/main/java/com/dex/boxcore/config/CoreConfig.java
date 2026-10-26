@@ -125,7 +125,7 @@ public final class CoreConfig {
             logger.warning("[" + FILE + "] 'types' section is missing, no boost type is declared");
         } else {
             for (String id : typesSection.getKeys(false)) {
-                BoostType type = parseType(typesSection, id, types.size(), warn, logger);
+                BoostType type = parseType(typesSection, id, types.size(), warn, logger, isUsableItem);
                 if (type != null) types.put(id, type);
             }
         }
@@ -199,8 +199,13 @@ public final class CoreConfig {
                 zone, smallCaps, palette, separator, gem);
     }
 
+    /** {@code bottle-material} of the shipped types when the key is missing (Update 05 E1). */
+    private static final Map<String, Material> SHIPPED_MATERIALS = Map.of(
+            "mining", Material.HONEY_BOTTLE,
+            "quest", Material.POTION);
+
     private static BoostType parseType(ConfigurationSection section, String id, int index,
-                                       Warn warn, Logger logger) {
+                                       Warn warn, Logger logger, java.util.function.Predicate<Material> isUsableItem) {
         String path = "types." + id;
         if (!TYPE_ID.matcher(id).matches()) {
             logger.warning("[" + FILE + "] Skipping boost type '" + id + "': id must match ^[a-z0-9_]{1,32}$");
@@ -256,7 +261,19 @@ public final class CoreConfig {
                 warn.invalid(path + ".bossbar-color", rawColor, "WHITE");
             }
         }
-        return new BoostType(id, index, displayName, description, max, decimal, maxDuration, textColor, color);
+        Material bottleMaterial = SHIPPED_MATERIALS.get(id);
+        String rawMaterial = s.getString("bottle-material");
+        if (rawMaterial != null) {
+            Material m = Material.matchMaterial(rawMaterial.trim());
+            if (m == null || !isUsableItem.test(m)) {
+                warn.invalid(path + ".bottle-material", rawMaterial,
+                        bottleMaterial == null ? "bottle.material" : bottleMaterial.name());
+            } else {
+                bottleMaterial = m;
+            }
+        }
+        return new BoostType(id, index, displayName, description, max, decimal, maxDuration, textColor, color,
+                bottleMaterial);
     }
 
     private static boolean bool(YamlConfiguration yaml, String key, boolean def, Warn warn) {
@@ -285,7 +302,12 @@ public final class CoreConfig {
     public Map<String, BoostType> types() { return types; }
     public List<BoostType> typeList() { return typeList; }
     public BoostType type(String id) { return id == null ? null : types.get(id); }
+    /** The global {@code bottle.material}: material of the types without {@code bottle-material}. */
     public Material bottleMaterial() { return bottleMaterial; }
+    /** Material of a type's bottles (Update 05 E1). */
+    public Material bottleMaterial(BoostType type) {
+        return type != null && type.bottleMaterial() != null ? type.bottleMaterial() : bottleMaterial;
+    }
     public UseClick useClick() { return useClick; }
     public int useCooldownTicks() { return useCooldownTicks; }
     public int confirmWindowSeconds() { return confirmWindowSeconds; }
