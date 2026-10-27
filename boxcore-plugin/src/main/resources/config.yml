@@ -20,7 +20,7 @@ config-version: 2
 # every use, but only the limits below protect you from a crafted bottle.
 
 # Boost types. A type only has an effect if some plugin asks BoxCore for it
-# (mining: CataMines, quest: BoxQuest). Giving a bottle of an undeclared type is refused.
+# (mining: CataMines, quest: BoxQuest, mob: MyBoxMobs). Giving a bottle of an undeclared type is refused.
 #   id              ^[a-z0-9_]{1,32}$
 #   decimal         true: multipliers may have one decimal (x1.5, x2.5), smallest x1.1;
 #                   false (default when missing): whole numbers only, smallest x2.
@@ -54,6 +54,15 @@ types:
     color: '#55FFFF'
     bossbar-color: BLUE
     bottle-material: POTION
+  # MyBoxMobs: multiplies items, money and gem from mob/boss rewards (rank permission boxcore.boost.mob.<n>)
+  mob:
+    display-name: 'Mob'
+    description: 'Tăng x%multiplier% phần thưởng nhận được khi hạ mob, boss'
+    decimal: true
+    max-multiplier: 100
+    max-duration: 24h
+    color: '#C3B1E1'
+    bossbar-color: PURPLE
 
 bottle:
   # Item material of the bottles of a type without bottle-material. Vanilla behaviour (throwing, drinking,

@@ -57,7 +57,7 @@ class ConfigLoadingTest {
         Capture capture = new Capture();
         CoreConfig config = CoreConfig.parse(bundled("config.yml"), logger(capture), m -> true);
         assertTrue(capture.messages.isEmpty(), capture.messages.toString());
-        assertEquals(List.of("mining", "quest"), new ArrayList<>(config.types().keySet()));
+        assertEquals(List.of("mining", "quest", "mob"), new ArrayList<>(config.types().keySet()));
         BoostType mining = config.type("mining");
         assertEquals(0, mining.index());
         assertEquals(1000, mining.maxTenths());
@@ -103,7 +103,7 @@ class ConfigLoadingTest {
         Capture capture = new Capture();
         CoreConfig config = CoreConfig.parse(yaml, logger(capture), m -> true);
 
-        assertEquals(List.of("mining", "quest"), new ArrayList<>(config.types().keySet()));
+        assertEquals(List.of("mining", "quest", "mob"), new ArrayList<>(config.types().keySet()));
         assertEquals(BossBar.Color.WHITE, config.type("quest").color());
         assertNull(config.type("mining").textColor());
         assertEquals(CoreConfig.UseClick.RIGHT, config.useClick());
