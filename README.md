@@ -23,7 +23,7 @@ Kết quả:
 
 | File | Dùng cho |
 |---|---|
-| `boxcore-plugin/build/libs/BoxCore-1.5.0.jar` | bỏ vào `plugins/` của server (đã chứa API, không relocate) |
+| `boxcore-plugin/build/libs/BoxCore-1.6.0.jar` | bỏ vào `plugins/` của server (đã chứa API, không relocate) |
 | `boxcore-api/build/libs/boxcore-api-1.3.0.jar` | cho plugin khác compile (`provided` / `compileOnly`); 1.3.0 chỉ thêm API boost bang hội, plugin build với API cũ vẫn chạy |
 
 Plugin test tích hợp (chỉ compile với API qua `mavenLocal()`): `examples/boxcore-test-plugin` — chạy `../../gradlew build` trong thư mục đó, lệnh trong game `/boxcoretest [player]`.
@@ -77,6 +77,14 @@ Placeholder:
 - Chai và file boost cũ dùng tiếp được; chai nguyên của 1.3.0 và 1.4.0 vẫn gộp chồng.
 - Hạ cấp về 1.3.0: chai lẻ (x1.5) không dùng được, boost lẻ đang chạy bị bỏ khi nạp file.
 - Tắt `decimal` của một loại khi đang có boost lẻ chạy: hệ số hiệu lực bỏ phần lẻ (x2.5 thành x2), chai lẻ còn trong túi không dùng được (không bị mất).
+
+## Nâng cấp lên 1.6.0 (cộng thêm từ pet)
+
+- Chỉ thay jar `BoxCore-1.6.0.jar`, không cần sửa config. `messages.yml` có thêm 2 dòng `check.bonus` /
+  `check.bonus-none` (thiếu thì dùng mặc định trong jar).
+- Plugin khác (BoxPet) có thể cộng thêm một hệ số P lên trên nguồn đang thắng:
+  `hiệu lực = min(max(rank + chai, global, bang hội, x1) + P, tối đa)`. Mine là số nguyên nên chỉ nhận phần nguyên.
+- `/boxcore check <người chơi>` hiện thêm dòng "Cộng thêm (pet)"; placeholder mới `%boxcore_bonus_<type>%`.
 
 ## Nâng cấp lên 1.5.0 (boost bang hội, chai mới)
 

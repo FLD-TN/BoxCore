@@ -25,6 +25,7 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
     private static final String MULTIPLE = "multiple_";
     private static final String RAW = "_raw";
     private static final String CLAN = "clan_";
+    private static final String BONUS = "bonus_";
     private static final String REMAINING = "_remaining";
     private static final String GEM = "gem";
     private static final String GEM_TOP = "gem_top_";
@@ -79,6 +80,12 @@ public final class BoxCoreExpansion extends PlaceholderExpansion {
             } catch (Throwable t) {
                 return "1";
             }
+        }
+        if (params.startsWith(BONUS)) {
+            // BoxCore 1.6.0: bonus_<type> = bonus P of the player ("0" if none)
+            EffectiveCache.Snapshot s = player == null ? null : cache.snapshot(player.getUniqueId());
+            int tenths = s == null ? 0 : s.bonus(params.substring(BONUS.length()));
+            return tenths <= 0 ? "0" : messages.get().multiplier(tenths);
         }
         if (params.startsWith(CLAN)) {
             try {

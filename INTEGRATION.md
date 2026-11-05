@@ -1,4 +1,4 @@
-# BoxCore — Integration Guide (BoxCore 1.5.0, API 1.3.0)
+# BoxCore — Integration Guide (BoxCore 1.6.0, API 1.4.0)
 
 This is the only document you need to integrate a plugin with BoxCore. Do not modify BoxCore; use the API below.
 
@@ -9,6 +9,8 @@ BoxCore 1.3.0 adds the **GEM** currency and API `com.dex:boxcore-api:1.1.0`, whi
 BoxCore 1.4.0 (API `com.dex:boxcore-api:1.2.0`) allows **decimal multipliers** (one decimal, e.g. x1.5) for the types declared with `decimal: true` in BoxCore's `config.yml` (by default only `quest`; `mining` stays whole). The API only **adds** default methods (`getMultiplierTenths`, `getMultiplierExact`) and the helper class `Multipliers` (§11). `getMultiplier` keeps its signature and returns the **whole part** (x1.5 → 1), so a plugin built against an older API never gives more than the boost; it only misses the decimal part. A plugin whose type is whole (`mining`) needs no change.
 
 BoxCore 1.5.0 (API `com.dex:boxcore-api:1.3.0`) adds **clan boosts** (§12). The API only **adds** types and default methods; a plugin that only reads multipliers needs no change, the clan boost is already in `getMultiplier`.
+
+BoxCore 1.6.0 (API `com.dex:boxcore-api:1.4.0`) adds **bonus providers** (§13): a plugin such as BoxPet can add a flat bonus `P` on top of the winning source. Plugins that only read multipliers need no change: the bonus is already in `getMultiplier` / `getMultiplierTenths`.
 
 ## 1. What BoxCore does
 
@@ -421,3 +423,31 @@ BoxCore bottles, e.g. in a clan storage.
 Every change of a clan boost fires `com.dex.boxcore.api.event.ClanBoostEvent` on the main thread after it happened
 (`action()`: `STARTED`, `EXTENDED`, `REPLACED`, `STOPPED`, `EXPIRED`; `clan()`, `type()`, `tenths()`, `oldTenths()`,
 `expiresAt()`, `addedSeconds()`, `actor()` = player name or `null`), whatever caused it: a bottle in hand, the API, the tick.
+
+## 13. Bonus providers (API 1.4.0, BoxCore 1.6.0)
+
+A bonus provider adds a flat value `P` **on top of** the winning source. Used by BoxPet: the active pet of a boost
+role (mining / quest / mob) adds its bonus to the player's multiplier, so every plugin that already reads BoxCore
+(CataMines, BoxQuest, MyBoxMobs) applies it without any change.
+
+```
+effective = min( max(R + B, G, C, x1) + P, max-multiplier )
+```
+
+- `P` is the sum of every registered provider's `bonusTenths(player, type)` (negative values count as 0).
+- For a type with `decimal: false` (`mining`) only the whole part of the final value is kept, so a bonus below x1
+  has no effect there: give whole steps (`10`, `20`) for such types.
+- BoxCore asks the provider when it recomputes the player (join, boost start / expiry, permission refresh, reload) and
+  when the provider calls `refreshBonusOf(player)`. Call it whenever your bonus changes.
+
+```java
+BoostService boosts = Bukkit.getServicesManager().load(BoostService.class);
+boosts.registerBonusProvider(plugin, (player, type) -> pets.bonusTenths(player, type));
+// later, when the pet changes:
+boosts.refreshBonusOf(playerId);
+```
+
+- The provider is removed automatically when your plugin is disabled.
+- `getBonusTenths(player, type)` returns the `P` used in the last recompute (display only).
+- Shown by `/boxcore check <player>` (line "Cộng thêm (pet)") and the placeholder `%boxcore_bonus_<type>%`.
+- With BoxCore older than 1.6.0 the default methods do nothing: your plugin keeps working, without the bonus.

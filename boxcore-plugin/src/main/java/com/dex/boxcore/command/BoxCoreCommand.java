@@ -280,6 +280,9 @@ public final class BoxCoreCommand implements TabExecutor {
                         "remaining", DurationFormat.clock(DurationFormat.remainingSeconds(clanBoost.expiresAt(), now)),
                         "time", clock.format(Instant.ofEpochMilli(clanBoost.expiresAt())));
             }
+            int bonus = snapshot.bonus(id);
+            msg.sendLine(sender, type, msg.raw(bonus > 0 ? "check.bonus" : "check.bonus-none"),
+                    "multiplier", msg.multiplier(bonus));
             if (MultiplierCalculator.personal(rank, bottle) > type.maxTenths() || global > type.maxTenths()
                     || clanTenths > type.maxTenths()) {
                 msg.sendLine(sender, type, msg.raw("check.capped"), "max", msg.multiplier(type.maxTenths()));

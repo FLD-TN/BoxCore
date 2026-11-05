@@ -98,6 +98,33 @@ public final class BoostServiceImpl implements BoostService {
         }
     }
 
+    // ------------------------------------------------------------------ bonus providers (BoxCore 1.6.0)
+
+    @Override
+    public void registerBonusProvider(Plugin owner, com.dex.boxcore.api.BonusProvider provider) {
+        if (controller == null || owner == null || provider == null) return;
+        onMain(() -> {
+            controller.bonuses().set(owner, provider);
+            controller.refreshAll(System.currentTimeMillis());
+            logger.info("Boost bonus enabled: provided by " + owner.getName());
+        });
+    }
+
+    @Override
+    public void refreshBonusOf(UUID player) {
+        if (controller == null || player == null) return;
+        onMain(() -> controller.refreshPlayer(player, System.currentTimeMillis()));
+    }
+
+    @Override
+    public int getBonusTenths(UUID player, String type) {
+        try {
+            return player == null || type == null ? 0 : cache.bonus(player, type);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     // ------------------------------------------------------------------ clan boosts (Update 05 E3)
 
     @Override

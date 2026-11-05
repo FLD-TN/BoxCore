@@ -27,9 +27,16 @@ public final class EffectiveCache {
      * @param clanBoost active boost C of the player's clan (0 = none, Update 05 E3)
      * @param clanExpiresAt expiry of that clan boost, epoch milliseconds (0 = none)
      * @param clan      the player's clan when computed, {@code null} if none or no clan plugin
+     * @param bonus     bonus P of the bonus providers (0 = none, BoxCore 1.6.0)
      */
     public record Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global,
-                           int[] clanBoost, long[] clanExpiresAt, UUID clan) {
+                           int[] clanBoost, long[] clanExpiresAt, UUID clan, int[] bonus) {
+
+        /** Snapshot without bonus data (BoxCore 1.5.0 shape, the bonus array holds zeros). */
+        public Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global,
+                        int[] clanBoost, long[] clanExpiresAt, UUID clan) {
+            this(types, effective, rank, bottle, global, clanBoost, clanExpiresAt, clan, new int[effective.length]);
+        }
 
         /** Snapshot without clan data (the clan arrays hold zeros). */
         public Snapshot(Map<String, BoostType> types, int[] effective, int[] rank, int[] bottle, int[] global) {
@@ -68,6 +75,11 @@ public final class EffectiveCache {
             return t == null ? 0L : clanExpiresAt[t.index()];
         }
 
+        /** The bonus P of the type, 0 if none (BoxCore 1.6.0). */
+        public int bonus(String type) {
+            return value(bonus, type, 0);
+        }
+
         /** {@code max(R + B, 10)}. */
         public int personal(String type) {
             return MultiplierCalculator.personal(rank(type), bottle(type));
@@ -82,13 +94,25 @@ public final class EffectiveCache {
         return s == null ? Multipliers.ONE : s.effective(type);
     }
 
+    /** Bonus P in tenths, 0 for unknown players or types. Thread-safe. */
+    public int bonus(UUID player, String type) {
+        Snapshot s = entries.get(player);
+        return s == null ? 0 : s.bonus(type);
+    }
+
     /** @return the player's snapshot, or {@code null} if the player is not online */
     public Snapshot snapshot(UUID player) {
         return entries.get(player);
     }
 
-    /** Recomputes and replaces a player's entry (main thread). */
+    /** Recomputes and replaces a player's entry (main thread), without bonus providers. */
     public Snapshot recompute(Player player, CoreConfig config, BoostRegistry registry, ClanLink clans, long now) {
+        return recompute(player, config, registry, clans, null, now);
+    }
+
+    /** Recomputes and replaces a player's entry (main thread). */
+    public Snapshot recompute(Player player, CoreConfig config, BoostRegistry registry, ClanLink clans,
+                              BonusLink bonuses, long now) {
         Map<String, BoostType> types = config.types();
         int size = types.size();
         int[] rank = PermissionReader.read(player, types);
@@ -97,6 +121,7 @@ public final class EffectiveCache {
         int[] clanBoost = new int[size];
         long[] clanExpiresAt = new long[size];
         int[] effective = new int[size];
+        int[] bonus = new int[size];
         List<PersonalBoost> personal = registry.personal(player.getUniqueId());
         UUID clan = clans == null ? null : clans.clanOf(player.getUniqueId());
         for (BoostType type : config.typeList()) {
@@ -106,12 +131,14 @@ public final class EffectiveCache {
             ClanBoost cb = registry.clan(clan, type.id());
             clanBoost[i] = MultiplierCalculator.clan(cb, now);
             clanExpiresAt[i] = clanBoost[i] > 0 ? cb.expiresAt() : 0L;
-            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], clanBoost[i], type.maxTenths());
+            bonus[i] = bonuses == null ? 0 : bonuses.bonus(player.getUniqueId(), type.id());
+            effective[i] = MultiplierCalculator.effective(rank[i], bottle[i], global[i], clanBoost[i], bonus[i],
+                    type.maxTenths());
             // Update 04 D1: a whole-number type never reports a decimal, even from a boost stored while the
             // type was decimal (the owner switched decimal off); the decimal part is dropped
             if (!type.decimal()) effective[i] -= effective[i] % Multipliers.ONE;
         }
-        Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global, clanBoost, clanExpiresAt, clan);
+        Snapshot snapshot = new Snapshot(types, effective, rank, bottle, global, clanBoost, clanExpiresAt, clan, bonus);
         entries.put(player.getUniqueId(), snapshot);
         return snapshot;
     }
