@@ -10,7 +10,7 @@ hiệu lực = min( max(rank + chai, global, 1), max-multiplier )
 
 Rank cộng dồn với chai cá nhân; mỗi loại chỉ có **1 chai đang chạy** (chai cao hơn thay chai cũ); global không cộng dồn.
 
-Đặc tả: [BOXCORE_SPEC.md](BOXCORE_SPEC.md) + [BOXCORE_SPEC_UPDATE_01.md](BOXCORE_SPEC_UPDATE_01.md) + [BOXCORE_SPEC_UPDATE_03.md](BOXCORE_SPEC_UPDATE_03.md) (Gem; bản 1.2.0 bị bỏ qua) + [BOXCORE_SPEC_UPDATE_04.md](BOXCORE_SPEC_UPDATE_04.md) (bội số lẻ cho quest). Tài liệu cho plugin khác tích hợp: [INTEGRATION.md](INTEGRATION.md).
+Tài liệu cho plugin khác tích hợp: [INTEGRATION.md](INTEGRATION.md).
 
 ## Build
 
