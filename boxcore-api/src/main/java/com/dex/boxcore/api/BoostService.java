@@ -150,6 +150,35 @@ public interface BoostService {
         return java.util.Optional.empty();
     }
 
+    // ------------------------------------------------------------------ bonus providers (1.4.0, BoxCore 1.6.0)
+
+    /**
+     * Registers a bonus provider (e.g. the pets of BoxPet). Replaces a previous provider of the same plugin; removed
+     * automatically when {@code owner} is disabled. Every online player's multipliers are recomputed.
+     * Effective value: {@code min(max(R + B, G, C, x1) + P, max-multiplier)}, see {@link BonusProvider}.
+     *
+     * @since 1.4.0
+     */
+    default void registerBonusProvider(org.bukkit.plugin.Plugin owner, BonusProvider provider) {}
+
+    /**
+     * Recomputes a player's multipliers after their bonus changed (pet summoned, levelled up, put away...).
+     * Safe from any thread (moved to the main thread).
+     *
+     * @since 1.4.0
+     */
+    default void refreshBonusOf(UUID player) {}
+
+    /**
+     * The bonus {@code P} of an online player for a type, in tenths, as used in the last recompute ({@code 0} if
+     * none). Thread-safe.
+     *
+     * @since 1.4.0
+     */
+    default int getBonusTenths(UUID player, String type) {
+        return 0;
+    }
+
     /**
      * The boost data of an item, empty if it is not a boost bottle. Reads the item's data only (never its name or
      * lore) and does not validate it against the current config.

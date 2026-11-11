@@ -163,7 +163,8 @@ bossbar:
   clan-suffix: ' <gray>| <muted>đang dùng <text>x%effective%'
 
 # /boxcore check <player> (admin, no prefix). %time% uses config.yml timezone
-# rank = R (0 = none), bottle = B (0 = none), personal = max(R + B, 1), effective = min(max(personal, global, 1), max)
+# rank = R (0 = none), bottle = B (0 = none), personal = max(R + B, 1),
+# effective = min(max(personal, global, clan, 1) + bonus, max)   (bonus = pet of BoxPet, BoxCore 1.6.0)
 check:
   header: '<accent>Boost của <text>%player%'
   type: '<muted>• <type>%type_name% <muted>(%type%) hiệu lực <accent>x%effective%'
@@ -176,6 +177,9 @@ check:
   clan: '<muted>  • Bang hội: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%)'
   clan-used: '<muted>  • Bang hội: <text>x%multiplier% <muted>còn <text>%remaining% <muted>(hết hạn %time%) → <accent>đang dùng bang hội'
   clan-none: '<muted>  • Bang hội: <text>không có'
+  # bonus P of plugins such as BoxPet (BoxCore 1.6.0): added on top of the source above that wins
+  bonus: '<muted>  • Cộng thêm (pet): <text>+x%multiplier%'
+  bonus-none: '<muted>  • Cộng thêm (pet): <text>không có'
   capped: '<muted>  • Giới hạn tối đa <text>x%max%'
 
 # GEM currency. %gem% is the coloured gem name (config.yml gem.display-name and gem.color)

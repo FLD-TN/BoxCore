@@ -1,97 +1,92 @@
 # BoxCore
 
-Plugin lõi của server BoxPvP (Paper 1.21.1, Java 21). Phiên bản 1.4.0: **boost** (bội số theo loại: số nguyên, riêng loại `decimal: true` như `quest` được lẻ 1 chữ số, ví dụ x1.5) và tiền tệ **GEM**.
+Plugin lõi của server BoxPvP, cung cấp hai thứ cho các plugin khác dùng chung: **boost** (hệ số nhân theo loại, ví dụ
+mining, quest, mob) và tiền tệ **Gem**. Các plugin Box* khác đọc hệ số và trừ / cộng Gem qua API của BoxCore.
 
-Công thức (mỗi người chơi, mỗi loại; nguồn không có tính là 0):
+Paper 1.21.1, Java 21. PlaceholderAPI không bắt buộc.
+
+## Boost
+
+Mỗi loại boost khai báo trong `types` của `config.yml` (tên, màu, bossbar, hệ số tối đa, thời gian tối đa, chất liệu
+chai). Loại có `decimal: true` nhận hệ số lẻ một chữ số (x1.5); loại khác chỉ nhận số nguyên.
+
+Một người chơi có thể được boost từ 4 nguồn:
+
+- **Rank**: quyền `boxcore.boost.<loại>.<n>`, ví dụ `boxcore.boost.mining.5`. Hệ số lẻ viết `1_5` thay cho `1.5`.
+- **Chai cá nhân**: chuột phải để dùng. Mỗi loại chỉ chạy một chai. Chai cùng hệ số thì cộng thêm thời gian, chai cao
+  hơn thì thay chai cũ (có hỏi xác nhận), chai thấp hơn bị từ chối và giữ lại.
+- **Global**: admin bật cho cả server.
+- **Bang hội** (cần BoxClans): chai bang hội, chỉ Minh Chủ / Phó Bang dùng, áp cho cả clan.
+
+Hệ số thực tế:
 
 ```
-hiệu lực = min( max(rank + chai, global, 1), max-multiplier )
+hiệu lực = min( max(rank + chai, global, bang hội, 1) + cộng thêm, max-multiplier )
 ```
 
-Rank cộng dồn với chai cá nhân; mỗi loại chỉ có **1 chai đang chạy** (chai cao hơn thay chai cũ); global không cộng dồn.
+"Cộng thêm" là phần plugin khác gửi vào qua API (BoxPet dùng để cộng hệ số từ pet). Loại số nguyên như mining chỉ
+nhận phần nguyên. Boost đang chạy hiện trên bossbar và lưu theo thời điểm hết hạn thật, restart không mất thời gian.
 
-Đặc tả: [BOXCORE_SPEC.md](BOXCORE_SPEC.md) + [BOXCORE_SPEC_UPDATE_01.md](BOXCORE_SPEC_UPDATE_01.md) + [BOXCORE_SPEC_UPDATE_03.md](BOXCORE_SPEC_UPDATE_03.md) (Gem; bản 1.2.0 bị bỏ qua) + [BOXCORE_SPEC_UPDATE_04.md](BOXCORE_SPEC_UPDATE_04.md) (bội số lẻ cho quest). Tài liệu cho plugin khác tích hợp: [INTEGRATION.md](INTEGRATION.md).
+## Gem
+
+Số dư Gem theo người chơi, lưu ở `gems.db` (SQLite) kèm sổ giao dịch (tự xoá bản ghi cũ hơn `gem.log-keep-days`).
+Gem không phải economy của Vault; Vault vẫn là tiền chính của server. Admin cộng / trừ được cả người offline. Chuyển
+Gem giữa người chơi (`/gem pay`) mặc định tắt, cấp quyền mới dùng được.
+
+## Lệnh
+
+| Lệnh | Quyền | Mô tả |
+|---|---|---|
+| `/booster` | `boxcore.use` | Hướng dẫn boost |
+| `/gem` (`/gems`, `/ngoc`) | `boxcore.gem.use` | Xem số dư |
+| `/gem top` | `boxcore.gem.use` | Bảng xếp hạng Gem |
+| `/gem pay <người chơi> <số>` | `boxcore.gem.pay` | Chuyển Gem (mặc định không ai có) |
+| `/boxcore give <người chơi> <loại> <hệ số> <thời gian> [số lượng] [clan]` | `boxcore.admin` | Tặng chai boost, thêm `clan` để tạo chai bang hội |
+| `/boxcore global start <loại> <hệ số> <thời gian>` | `boxcore.admin` | Bật boost toàn server |
+| `/boxcore global stop <loại>` | `boxcore.admin` | Tắt boost toàn server |
+| `/boxcore check <người chơi>` | `boxcore.admin` | Xem từng nguồn boost của một người |
+| `/boxcore gem give\|take\|set <người chơi> <số> [lý do] [-s]` | `boxcore.admin` | Sửa Gem; `-s` không báo cho người chơi |
+| `/boxcore gem check <người chơi>` | `boxcore.admin` | Xem Gem của người khác |
+| `/boxcore reload` | `boxcore.admin` | Đọc lại config và messages |
+
+Lý do ghi vào sổ giao dịch, ví dụ phần thưởng quest: `boxcore gem give {player} 50 quest:mine-t3`.
+
+## Placeholder
+
+| Placeholder | Giá trị |
+|---|---|
+| `%boxcore_multiple_<loại>%` | Hệ số hiệu lực (`2`, `1.5`; dấu thập phân theo `multiplier-decimal-separator`) |
+| `%boxcore_multiple_<loại>_raw%` | Như trên nhưng luôn dùng dấu chấm |
+| `%boxcore_clan_<loại>%`, `%boxcore_clan_<loại>_remaining%` | Hệ số và thời gian còn lại của boost bang hội |
+| `%boxcore_bonus_<loại>%` | Phần cộng thêm từ plugin khác (pet) |
+| `%boxcore_gem%`, `%boxcore_gem_formatted%`, `%boxcore_gem_short%` | Số dư: `1250`, `1.250`, `1,2K` |
+| `%boxcore_gem_name%` | Tên hiển thị của Gem |
+| `%boxcore_gem_top_<n>_name%`, `%boxcore_gem_top_<n>_amount%` | Hạng `n` của bảng xếp hạng |
+
+## Dữ liệu (`plugins/BoxCore/`)
+
+- `global-boosts.yml`, `player-boosts.yml`, `clan-boosts.yml`: boost đang chạy. File hỏng được đổi tên thành
+  `*.broken-<thời gian>` thay vì bị xoá.
+- `gems.db`: sao lưu khi server tắt, hoặc chép cả `gems.db-wal` và `gems.db-shm`. File hỏng không bao giờ bị xoá;
+  Gem tạm tắt còn boost vẫn chạy.
+
+## Cho plugin khác
+
+API nằm trong module `boxcore-api` (package `com.dex.boxcore.api`), chỉ dùng `compileOnly`, không shade. Hướng dẫn đầy
+đủ ở [INTEGRATION.md](INTEGRATION.md). `examples/boxcore-test-plugin` là một plugin mẫu dùng API.
 
 ## Build
 
 ```
-./gradlew build                 # compile + unit test
-./gradlew publishToMavenLocal   # cài com.dex:boxcore-api:1.2.0 vào ~/.m2
+./gradlew build                  # compile + test
+./gradlew publishToMavenLocal    # cài com.dex:boxcore-api vào ~/.m2 cho plugin khác
 ```
-
-Kết quả:
 
 | File | Dùng cho |
 |---|---|
-| `boxcore-plugin/build/libs/BoxCore-1.5.0.jar` | bỏ vào `plugins/` của server (đã chứa API, không relocate) |
-| `boxcore-api/build/libs/boxcore-api-1.3.0.jar` | cho plugin khác compile (`provided` / `compileOnly`); 1.3.0 chỉ thêm API boost bang hội, plugin build với API cũ vẫn chạy |
+| `boxcore-plugin/build/libs/BoxCore-<version>.jar` | Bỏ vào `plugins/` (đã chứa sẵn API) |
+| `boxcore-api/build/libs/boxcore-api-<version>.jar` | Cho plugin khác compile |
 
-Plugin test tích hợp (chỉ compile với API qua `mavenLocal()`): `examples/boxcore-test-plugin` — chạy `../../gradlew build` trong thư mục đó, lệnh trong game `/boxcoretest [player]`.
+Repo chỉ chứa mã nguồn, không có jar nào ngoài `gradle/wrapper/gradle-wrapper.jar` của Gradle.
 
-## Lệnh
-
-| Lệnh | Quyền |
-|---|---|
-| `/booster` | `boxcore.use` (mặc định true) |
-| `/boxcore give <player> <type> <multiplier> <duration> [amount] [clan]` | `boxcore.admin` (`clan` = chai bang hội) |
-| `/boxcore global start <type> <multiplier> <duration>` | `boxcore.admin` |
-| `/boxcore global stop <type>` | `boxcore.admin` |
-| `/boxcore reload` | `boxcore.admin` |
-| `/boxcore check <player>` | `boxcore.admin` |
-| `/boxcore gem give\|take\|set <player> <amount> [reason] [-s]` | `boxcore.admin` (chạy được từ console, cả người chơi offline) |
-| `/boxcore gem check <player>` | `boxcore.admin` |
-| `/gem` (bí danh `/gems`, `/ngoc`) | `boxcore.gem.use` (mặc định true) |
-| `/gem top` | `boxcore.gem.use` |
-| `/gem pay <player> <amount>` | `boxcore.gem.pay` (mặc định **false**, cấp bằng LuckPerms) |
-
-Quyền rank: `boxcore.boost.<type>.<n>` (ví dụ `boxcore.boost.mining.5`). Loại `decimal: true` nhận thêm dạng `<nguyên>_<1 chữ số>`: `boxcore.boost.quest.1_5` = x1.5 (không dùng dấu chấm được).
-
-`<multiplier>` của `give` / `global start`: loại `mining` là số nguyên từ 2; loại `quest` (`decimal: true`) từ 1.1, tối đa 1 chữ số thập phân (`1.5` hoặc `1,5`).
-
-`-s`: không báo cho người nhận. Ví dụ thưởng quest bằng lệnh console: `boxcore gem give {player} 50 quest:mine-t3`.
-
-Placeholder:
-
-| Placeholder | Giá trị |
-|---|---|
-| `%boxcore_multiple_<type>%` | bội số boost hiệu lực (`2`, `1.5`; dấu thập phân theo `multiplier-decimal-separator`) |
-| `%boxcore_multiple_<type>_raw%` | như trên nhưng luôn dùng dấu chấm, cho plugin cần đọc số |
-| `%boxcore_clan_<type>%` | hệ số boost bang hội của người chơi (`1` nếu không có) |
-| `%boxcore_clan_<type>_remaining%` | thời gian còn lại của boost bang hội (rỗng nếu không có) |
-| `%boxcore_gem%` | số dư Gem, số thô (`1250`) |
-| `%boxcore_gem_formatted%` | `1.250` |
-| `%boxcore_gem_short%` | `1,2K`, `3,4M` |
-| `%boxcore_gem_name%` | tên hiển thị của Gem |
-| `%boxcore_gem_top_<n>_name%`, `%boxcore_gem_top_<n>_amount%` | hạng `n` của bảng xếp hạng |
-
-## File dữ liệu (`plugins/BoxCore/`)
-
-- `config.yml`, `messages.yml` — cấu hình và toàn bộ text (tiếng Việt, small caps bật mặc định). Có khóa `config-version: 2`; file của bản 1.0.0 (không có khóa này) được tự động sao lưu thành `*.1.0.0.bak` và thay bằng mặc định mới khi khởi động.
-- `global-boosts.yml`, `player-boosts.yml`, `clan-boosts.yml` — boost đang chạy, lưu theo thời điểm hết hạn tuyệt đối (giờ thực). File hỏng sẽ được đổi tên thành `*.broken-<timestamp>`.
-- `gems.db` (SQLite) — số dư Gem (`gem_balances`) và sổ giao dịch (`gem_transactions`, xóa bản ghi cũ hơn `gem.log-keep-days`). Sao lưu khi server tắt, hoặc chép kèm `gems.db-wal` và `gems.db-shm`. File hỏng **không** bao giờ bị xóa: Gem tạm tắt, boost vẫn chạy. Server nâng cấp từ 1.1.0 không cần sửa `config.yml`: thiếu mục `gem` thì dùng mặc định.
-
-## Nâng cấp lên 1.4.0 (bội số lẻ)
-
-- `config.yml` đang dùng **không** bị ghi đè. Thêm tay `decimal: true` vào `types.quest` rồi `/boxcore reload`; thiếu khóa này thì loại đó chỉ nhận số nguyên như cũ. `mining` giữ `decimal: false` (CataMines chỉ dùng hệ số nguyên). Tuỳ chọn: `multiplier-decimal-separator: '.'`.
-- `messages.yml` có khóa mới `error.multiplier-decimal`; thiếu thì dùng bản mặc định (một dòng cảnh báo khi khởi động).
-- Chai và file boost cũ dùng tiếp được; chai nguyên của 1.3.0 và 1.4.0 vẫn gộp chồng.
-- Hạ cấp về 1.3.0: chai lẻ (x1.5) không dùng được, boost lẻ đang chạy bị bỏ khi nạp file.
-- Tắt `decimal` của một loại khi đang có boost lẻ chạy: hệ số hiệu lực bỏ phần lẻ (x2.5 thành x2), chai lẻ còn trong túi không dùng được (không bị mất).
-
-## Nâng cấp lên 1.5.0 (boost bang hội, chai mới)
-
-- **Chai mới:** mining là chai mật ong (`HONEY_BOTTLE`), quest là chai nước (`POTION`), đổi được bằng
-  `types.<loại>.bottle-material`. `config.yml` cũ không có khoá này vẫn dùng đúng 2 chất liệu trên. Chai mới stack
-  được 64. Chai kinh nghiệm cũ vẫn dùng được. Chai không uống, không chế tạo, không bỏ vào lò thuốc được.
-- **Chữ trên chai** không còn small caps hay in đậm. `messages.yml` cũ: tên / lore chai và `/booster` còn đúng chữ
-  mặc định 1.4.0 thì tự dùng chữ mới; chữ đã sửa tay được giữ. Tin nhắn mới thiếu trong file thì lấy bản mặc định (1
-  dòng thông tin khi khởi động).
-- **Chai cá nhân:** cùng hệ số với chai đang chạy thì **cộng thêm thời gian** (tối đa `max-duration`, bị cắt thì hỏi
-  xác nhận); hệ số thấp hơn thì **từ chối, giữ chai**; cao hơn vẫn thay thế sau khi xác nhận.
-- **Boost bang hội** (cần BoxClans 1.3.0 trở lên): `/boxcore give <người> <loại> <hệ số> <thời gian> [số lượng] clan`
-  tạo chai bang hội, chỉ Minh Chủ / Phó Bang dùng được. Hệ số = cao nhất giữa (rank + chai), global, bang hội. Bossbar
-  riêng, `/boxcore check` có dòng "Bang hội", file `clan-boosts.yml`. Không có BoxClans: chai bang hội báo lỗi, không mất.
-- **Tin nhắn gem:** số gem và chữ "Gem" cùng màu tím của gem (`<gem>`, `gem.color` trong `config.yml`), ví dụ
-  "Bạn nhận được 1.250 Gem". `messages.yml` cũ còn đúng chữ mặc định thì tự dùng chữ mới; dòng đã sửa tay được giữ.
-- Placeholder mới: `%boxcore_clan_<loại>%` (hệ số bang hội, `1` nếu không có), `%boxcore_clan_<loại>_remaining%`.
-- API `boxcore-api-1.3.0`: chỉ thêm (mục 12 của `INTEGRATION.md`); plugin build với API cũ chạy bình thường.
+Ghi chú nâng cấp giữa các bản: [CHANGELOG.md](CHANGELOG.md).

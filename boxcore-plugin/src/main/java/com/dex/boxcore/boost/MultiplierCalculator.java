@@ -9,8 +9,11 @@ import java.util.List;
  *
  * <pre>
  * personal  = max(R + B, 10)                    rank + active personal bottle
- * effective = min(max(personal, G, C, 10), maxTenths)
+ * effective = min(max(personal, G, C, 10) + P, maxTenths)
  * </pre>
+ *
+ * {@code P} is the bonus of the registered bonus providers (BoxCore 1.6.0, e.g. BoxPet's active pet). It adds on top
+ * of whichever source wins.
  *
  * The global boost {@code G} and the clan boost {@code C} (Update 05 E3.1) never add up with anything; the cap
  * applies to the final value.
@@ -42,8 +45,19 @@ public final class MultiplierCalculator {
      * @param clan the running boost of the player's clan C (0 if none)
      */
     public static int effective(int rank, int bottle, int global, int clan, int maxTenths) {
-        int value = Math.max(Math.max(Math.max(personal(rank, bottle), global), clan), Multipliers.ONE);
-        return Math.max(Multipliers.ONE, Math.min(value, maxTenths));
+        return effective(rank, bottle, global, clan, 0, maxTenths);
+    }
+
+    /**
+     * Effective multiplier with the clan boost and the bonus {@code P} (BoxCore 1.6.0), in tenths:
+     * {@code min(max(personal, G, C, 10) + P, maxTenths)}.
+     *
+     * @param bonus the bonus of the bonus providers (0 if none); negative values count as 0
+     */
+    public static int effective(int rank, int bottle, int global, int clan, int bonus, int maxTenths) {
+        long value = Math.max(Math.max(Math.max(personal(rank, bottle), global), clan), Multipliers.ONE);
+        value += Math.max(bonus, 0);
+        return (int) Math.max(Multipliers.ONE, Math.min(value, maxTenths));
     }
 
     /**

@@ -40,6 +40,8 @@ public final class BoostController implements Listener {
     private final ErrorReporter errors;
     private final Executor nextTick;
     private final ClanLink clans;
+    /** Bonus providers (BoxCore 1.6.0). */
+    private final BonusLink bonuses;
     /** Fires Bukkit events; a no-op until the plugin sets it (unit tests have no server). */
     private Consumer<org.bukkit.event.Event> events = e -> {};
 
@@ -56,10 +58,15 @@ public final class BoostController implements Listener {
         this.errors = errors;
         this.nextTick = nextTick;
         this.clans = clans;
+        this.bonuses = new BonusLink(errors);
     }
 
     public ClanLink clans() {
         return clans;
+    }
+
+    public BonusLink bonuses() {
+        return bonuses;
     }
 
     /** Where {@link ClanBoostEvent}s go (Bukkit's plugin manager in the plugin). */
@@ -88,7 +95,7 @@ public final class BoostController implements Listener {
 
     /** Recomputes one player's effective multipliers and personal bars. */
     public EffectiveCache.Snapshot refresh(Player player, long now) {
-        EffectiveCache.Snapshot snapshot = cache.recompute(player, config.get(), registry, clans, now);
+        EffectiveCache.Snapshot snapshot = cache.recompute(player, config.get(), registry, clans, bonuses, now);
         bars.updatePlayer(player, snapshot, registry, now);
         return snapshot;
     }
@@ -346,11 +353,16 @@ public final class BoostController implements Listener {
         }
     }
 
-    /** The clan plugin was disabled: no clan boosts until it registers again (Update 05 E3.2). */
+    /**
+     * The clan plugin was disabled: no clan boosts until it registers again (Update 05 E3.2). A plugin with a bonus
+     * provider was disabled: its bonus is gone (BoxCore 1.6.0).
+     */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPluginDisable(PluginDisableEvent event) {
         try {
-            if (clans.removeIfOwner(event.getPlugin())) refreshAll(System.currentTimeMillis());
+            boolean clan = clans.removeIfOwner(event.getPlugin());
+            boolean bonus = bonuses.removeIfOwner(event.getPlugin());
+            if (clan || bonus) refreshAll(System.currentTimeMillis());
         } catch (Throwable t) {
             errors.report("plugin disable", t);
         }

@@ -9,7 +9,9 @@ plugins {
 // Multipliers; existing signatures are unchanged. getMultiplier returns the whole part of a decimal multiplier.
 // 1.3.0 (BoxCore 1.5.0) adds clan boosts: ClanProvider, ClanBoostResult, ActiveBoost, BottleInfo and default
 // methods on BoostService; existing signatures are unchanged.
-version = "1.3.0"
+// 1.4.0 (BoxCore 1.6.0) adds BonusProvider and the default methods registerBonusProvider / refreshBonusOf /
+// getBonusTenths on BoostService (a flat bonus P on top of the winning source, used by BoxPet).
+version = "1.4.0"
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT")
